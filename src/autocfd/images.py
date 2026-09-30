@@ -111,18 +111,27 @@ class PlaneCutter:
             self._created.append(name)
         return name
 
-    def cut(self, plane: str, field: Field) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """(vertices (n,3) in m, triangles (m,3), values (n,) in SI) of a field on a plane."""
-        from ansys.fluent.core import (ScalarFieldDataRequest, SurfaceDataType,
-                                       SurfaceFieldDataRequest)
+    def plane_position_mm(self, plane: str) -> float:
+        return float(self.mid[PLANES[plane][0]]) * 1000
 
-        name = self._surface(plane, field.fluid_only)
+    def geometry(self, plane: str, fluid_only: bool) -> tuple[np.ndarray, np.ndarray]:
+        """(vertices (n,3) in m, triangles (m,3)) of a cutting plane."""
+        from ansys.fluent.core import SurfaceDataType, SurfaceFieldDataRequest
+
+        name = self._surface(plane, fluid_only)
         geo = self.fd.get_field_data(SurfaceFieldDataRequest(
             surfaces=[name], data_types=[SurfaceDataType.Vertices, SurfaceDataType.FacesConnectivity]))[name]
+        return np.asarray(geo.vertices, dtype=float).reshape(-1, 3), triangulate(geo.connectivity)
+
+    def cut(self, plane: str, field: Field) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(vertices (n,3) in m, triangles (m,3), values (n,) in SI) of a field on a plane."""
+        from ansys.fluent.core import ScalarFieldDataRequest
+
+        verts, tris = self.geometry(plane, field.fluid_only)
+        name = self._surface(plane, field.fluid_only)
         values = self.fd.get_field_data(ScalarFieldDataRequest(
             field_name=field.fluent_name, surfaces=[name], node_value=True, boundary_value=True))[name]
-        verts = np.asarray(geo.vertices, dtype=float).reshape(-1, 3)
-        return verts, triangulate(geo.connectivity), np.asarray(values, dtype=float)
+        return verts, tris, np.asarray(values, dtype=float)
 
     def cleanup(self) -> None:
         """Remove the planes, so they are not written into the saved cases."""
@@ -232,26 +241,32 @@ def images_from_case(cfg, case_file: Path, images_dir: Path | None = None) -> li
         session.exit()
 
 
+def write_images(cutter: PlaneCutter, images_dir: Path, title: str,
+                 fields=("temperature", "pressure", "velocity"), planes=("xy", "yz", "xz"),
+                 dpi: int = 150, ranges: dict[str, tuple[float, float]] | None = None) -> list[Path]:
+    """One PNG per field and plane, with planes already set up in `cutter`."""
+    written = []
+    for fname in fields:
+        field = FIELDS[fname]
+        for plane in planes:
+            verts, tris, values = cutter.cut(plane, field)
+            if len(tris) == 0:
+                log.warning("Plane %s has no faces for %s; skipped", plane, fname)
+                continue
+            path = Path(images_dir) / f"{fname}_{plane}.png"
+            plot_plane(verts, tris, values, plane, field, cutter.plane_position_mm(plane), title, path,
+                       dpi, (ranges or {}).get(fname))
+            written.append(path)
+    log.info("%d images written to %s", len(written), images_dir)
+    return written
+
+
 def save_images(session, images_dir: Path, title: str, fields=("temperature", "pressure", "velocity"),
                 planes=("xy", "yz", "xz"), dpi: int = 150,
                 ranges: dict[str, tuple[float, float]] | None = None) -> list[Path]:
     """Cut the current solution and write one PNG per field and plane."""
     cutter = PlaneCutter(session)
-    written = []
     try:
-        for fname in fields:
-            field = FIELDS[fname]
-            for plane in planes:
-                verts, tris, values = cutter.cut(plane, field)
-                if len(tris) == 0:
-                    log.warning("Plane %s has no faces for %s; skipped", plane, fname)
-                    continue
-                path = Path(images_dir) / f"{fname}_{plane}.png"
-                pos_mm = float(cutter.mid[PLANES[plane][0]]) * 1000
-                plot_plane(verts, tris, values, plane, field, pos_mm, title, path, dpi,
-                           (ranges or {}).get(fname))
-                written.append(path)
+        return write_images(cutter, images_dir, title, fields, planes, dpi, ranges)
     finally:
         cutter.cleanup()
-    log.info("%d images written to %s", len(written), images_dir)
-    return written

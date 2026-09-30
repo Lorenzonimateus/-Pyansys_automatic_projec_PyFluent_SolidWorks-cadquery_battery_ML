@@ -15,8 +15,9 @@ ROOT = Path(__file__).resolve().parent
 #   "solve"     one point with the config values  "study"  DOE (resumable)
 #   "analyze"   sensitivity (no Ansys)            "train"  ML model (no Ansys)
 #   "optimize"  Bayesian optimization with CFD    "best"   best CFD points (no Ansys)
+#   "postprocess"  redo images + ML fields (.npz) of every saved study point
 #   (solve, study and optimize also save temperature/pressure/velocity images on the
-#    mid-planes xy, yz, xz; to redo them for saved cases: python -m autocfd images <case.cas.h5>)
+#    mid-planes xy, yz, xz, and the same fields as .npz on a fixed grid for CNN training)
 #
 #   check one geometry:        ["geometry", "mesh", "solve"]
 #   DOE + sensitivity + ML:    ["study", "analyze", "train"]

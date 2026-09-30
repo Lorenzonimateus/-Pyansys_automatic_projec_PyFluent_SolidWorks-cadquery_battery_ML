@@ -102,8 +102,9 @@ def run_points(cfg: Config, points: list[dict], results_csv: Path) -> None:
         try:
             for d, pcfg in pts:
                 try:
-                    res = runner.run(pcfg, save_as=out / "points" / f"dp{d['id']:03d}.cas.h5",
-                                     images_dir=out / "images" / f"dp{d['id']:03d}")
+                    tag = f"dp{d['id']:03d}"
+                    res = runner.run(pcfg, save_as=out / "points" / f"{tag}.cas.h5",
+                                     images_dir=out / "images" / tag, fields_dir=out / "ml_fields", name=tag)
                     append_csv(results_csv, {**d, "status": "ok", "geometry": key, **res})
                 except Exception as e:  # noqa: BLE001 - one failed point does not stop the study
                     log.exception("Point %d failed: %s", d["id"], e)

@@ -21,6 +21,7 @@ def launch(cfg: Config, mode: str, processors: int, cwd: Path):
     import ansys.fluent.core as pyfluent
 
     extra = f"-mpi={cfg.solver.mpi}" if cfg.solver.mpi else ""
+    Path(cwd).mkdir(parents=True, exist_ok=True)
     return pyfluent.launch_fluent(
         product_version=pyfluent.FluentVersion.v252,
         mode=mode,

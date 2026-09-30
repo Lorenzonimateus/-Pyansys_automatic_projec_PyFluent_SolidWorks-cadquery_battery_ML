@@ -6,6 +6,7 @@
   mesh       replay the Fluent Meshing workflow (.wft) on that geometry (cached)
   solve      one point with the values in the config (--base: base case as it is)
   study      run the DOE defined in [study] (resumable)
+  postprocess  redo images + ML fields (.npz) of every saved point of the study (--single: of solve)
   images     temperature/pressure/velocity on the mid-planes of saved cases (.cas.h5 + .dat.h5)
   analyze    sensitivity analysis of the study results (no Ansys)
   train      train the Machine Learning model on the study results (no Ansys)
@@ -50,6 +51,8 @@ def main(argv: list[str] | None = None) -> None:
     p_solve.add_argument("--base", action="store_true", help="solve the base case mesh (no geometry/meshing)")
     p_study = sub.add_parser("study")
     p_study.add_argument("--dry-run", action="store_true", help="only show the plan and the geometry groups")
+    p_post = sub.add_parser("postprocess")
+    p_post.add_argument("--single", action="store_true", help="points of single_runs.csv instead of the study")
     p_img = sub.add_parser("images")
     p_img.add_argument("cases", nargs="+", type=Path, help=".cas.h5 files (with their .dat.h5)")
     sub.add_parser("analyze")
@@ -81,6 +84,9 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "study":
         from .doe import run_study
         run_study(cfg, dry_run=args.dry_run)
+    elif args.command == "postprocess":
+        from .postprocess import postprocess_saved
+        print(f"{postprocess_saved(cfg, single=args.single)} point(s) post-processed")
     elif args.command == "images":
         from .images import images_from_case
         for case in args.cases:

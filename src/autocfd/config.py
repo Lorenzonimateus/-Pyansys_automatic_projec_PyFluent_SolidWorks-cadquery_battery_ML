@@ -73,6 +73,18 @@ class Images:
 
 
 @dataclass(frozen=True)
+class MLFields:
+    enabled: bool = True
+    planes: tuple[str, ...] = ("xy", "yz", "xz")
+    x_mm: tuple[float, float] = (0.0, 330.0)
+    y_mm: tuple[float, float] = (0.0, 70.15)
+    z_mm: tuple[float, float] = (-110.0, 0.0)
+    resolution: tuple[int, int, int] = (256, 64, 128)
+    normalization: dict[str, tuple[float, float]] = field(default_factory=lambda: {
+        "temperature": (20.0, 60.0), "pressure": (-200.0, 300.0), "velocity": (0.0, 30.0)})
+
+
+@dataclass(frozen=True)
 class Study:
     name: str = "study"
     samples: int = 20
@@ -101,6 +113,7 @@ class Config:
     solver: Solver = field(default_factory=Solver)
     outputs: dict[str, str] = field(default_factory=dict)
     images: Images = field(default_factory=Images)
+    ml_fields: MLFields = field(default_factory=MLFields)
     study: Study = field(default_factory=Study)
     optimize: Optimize = field(default_factory=Optimize)
 
@@ -180,9 +193,22 @@ def load_config(path: str | Path) -> Config:
         raise KeyError(f"Unknown sections in {path}: {sorted(unknown)}")
 
     study_raw = dict(raw.get("study", {}))
-    params = {k: (float(v[0]), float(v[1])) for k, v in study_raw.pop("parameters", {}).items()}
+    params, fixed = {}, {}
+    for k, v in study_raw.pop("parameters", {}).items():
+        values = v if isinstance(v, list) else [v]
+        if len(values) == 2:        # [min, max]: sampled
+            params[k] = (float(values[0]), float(values[1]))
+        elif len(values) == 1:      # [value]: fixed for the whole study
+            fixed[k] = float(values[0])
+        else:
+            raise ValueError(f"[study.parameters] {k!r} = {v}: use [min, max] for a range "
+                             "or [value] for a fixed value")
     images_raw = dict(raw.get("images", {}))
     ranges = {k: (float(v[0]), float(v[1])) for k, v in images_raw.pop("ranges", {}).items()}
+    mlf_raw = dict(raw.get("ml_fields", {}))
+    if "normalization" in mlf_raw:
+        mlf_raw["normalization"] = {k: (float(v[0]), float(v[1]))
+                                    for k, v in mlf_raw["normalization"].items()}
     cfg = Config(
         paths=_build(Paths, raw.get("paths", {})),
         cad={k: float(v) for k, v in raw.get("cad", {}).items()},
@@ -193,9 +219,14 @@ def load_config(path: str | Path) -> Config:
         solver=_build(Solver, raw.get("solver", {})),
         outputs=dict(raw.get("outputs", {})),
         images=_build(Images, {**images_raw, "ranges": ranges}),
+        ml_fields=_build(MLFields, mlf_raw),
         study=_build(Study, {**study_raw, "parameters": params}),
         optimize=_build(Optimize, raw.get("optimize", {})),
     )
+    for k in fixed:
+        if k.split(".", 1)[0] not in PARAMETER_SECTIONS:
+            raise KeyError(f"Study parameter {k!r} must be in one of {PARAMETER_SECTIONS}")
+    cfg = cfg.with_overrides(fixed)  # fixed study values replace the nominal ones
     validate(cfg)
     return cfg
 
@@ -219,6 +250,17 @@ def validate(cfg: Config) -> None:
     if bad or set(im.ranges) - set(im.fields):
         raise ValueError("[images] fields must be temperature/pressure/velocity, planes xy/yz/xz, "
                          "and ranges only for listed fields")
+    ml = cfg.ml_fields
+    if set(ml.planes) - {"xy", "yz", "xz"}:
+        raise ValueError("[ml_fields] planes must be xy, yz or xz")
+    if set(ml.normalization) != {"temperature", "pressure", "velocity"}:
+        raise ValueError("[ml_fields.normalization] needs temperature, pressure and velocity")
+    if len(ml.resolution) != 3 or min(ml.resolution) < 8:
+        raise ValueError("[ml_fields] resolution = [nx, ny, nz], each >= 8")
+    for name, (lo, hi) in [("x_mm", ml.x_mm), ("y_mm", ml.y_mm), ("z_mm", ml.z_mm),
+                           *ml.normalization.items()]:
+        if not lo < hi:
+            raise ValueError(f"[ml_fields] {name}: [{lo}, {hi}] is empty")
     if cfg.spaceclaim.flow_axis not in ("x", "y", "z"):
         raise ValueError("spaceclaim.flow_axis must be 'x', 'y' or 'z'")
     if cfg.optimize.sense not in ("min", "max"):

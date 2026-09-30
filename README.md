@@ -40,6 +40,8 @@ autocfd solve --base                   # base case as it is (checks the solver s
 autocfd study --dry-run                # LHS plan and geometry groups
 autocfd study                          # run the DOE (resumable)
 autocfd images output/single/<case>.cas.h5   # (re)generate the images of saved cases
+autocfd postprocess                    # redo images + ML fields of all saved study points
+autocfd postprocess --single           # same for the points of `solve`
 autocfd analyze                        # sensitivity: Sobol indices, CoP, response surfaces
 autocfd train                          # ML model, leave-one-out validation
 autocfd optimize                       # Bayesian optimization with CFD verification
@@ -115,6 +117,37 @@ no grid. One PNG per field and plane:
 `output/single/images/<case>/`). By default each image is scaled to its own
 min/max; set `[images] ranges` to use the same scale for every point.
 
+**Fields for Machine Learning (CNN).** The jet images are for people; for a model
+they are a poor format (one value spread over three non-linear RGB channels,
+8-bit quantization, and a per-image scale that changes the meaning of each
+color). So each point also writes, per mid-plane, a `.npz` with the raw fields on
+a **fixed regular grid** (same domain and resolution for every case,
+`[ml_fields]`; changing the geometry moves the solids inside the grid, never the
+grid):
+
+| key | content |
+|---|---|
+| `T`, `p`, `U` | float32 in °C, Pa (gauge), m/s; NaN where undefined (outside the domain; `p`, `U` also in the cells) |
+| `T_norm`, `p_norm`, `U_norm` | normalized with **fixed limits for the whole dataset** (`[ml_fields.normalization]`), 0 where undefined; limits stored as `T_limits`, ... |
+| `mask` | 1 = fluid, 0 = solid or outside the domain |
+| `sdf` | signed distance in mm to the nearest solid, wall or grid edge (> 0 in the fluid) |
+| `params`, `param_names` | the point's parameters (`cad.*`, `fluent.*`) |
+| `h`, `v`, `axes`, `plane_pos_mm` | grid coordinates in mm and plane position |
+
+Interpolation is barycentric on Fluent's own triangles of the cut (it never
+fills the cells with fluid values, as a convex-hull `griddata` would). Files:
+`output/studies/<name>/ml_fields/<plane>/dpNNN.npz` and `normalization.json`.
+A warning is logged when a case exceeds the grid or the normalization limits.
+For training:
+
+```python
+from autocfd.ml_fields import load_dataset
+ds = load_dataset("output/studies/doe_v1/ml_fields", "xz", targets=("T_norm",))
+ds["geometry"]  # (N, 2, 128, 256): mask, sdf    -> CNN input
+ds["params"]    # (N, P): velocity, heat source... -> vector or constant channels
+ds["targets"]   # (N, 1, 128, 256): T_norm        -> CNN output (U-Net)
+```
+
 **Failures.** A point whose geometry fails (SolidWorks rebuild error, meshing error)
 is written to `results.csv` with `status = geometry_failed` and the study goes on; a
 Fluent failure gives `solve_failed` and the session is restarted. Only `status = ok`
@@ -137,6 +170,8 @@ output/
     results.csv               one row per point, written as soon as it finishes
     points/dpNNN.cas.h5       case + data of each point
     images/dpNNN/             temperature/pressure/velocity on the planes xy, yz, xz
+    ml_fields/<plane>/dpNNN.npz   the same fields as float32 on a fixed grid (CNN dataset)
+    ml_fields/normalization.json  grid and normalization limits of the dataset
     sensitivity.csv, sensitivity_sobol.png, response_surfaces.png
     ml_model.joblib, ml_metrics.csv, ml_parity.png
     optimization.csv          each optimization iteration: proposal, prediction, CFD result

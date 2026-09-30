@@ -148,18 +148,12 @@ class FluentRunner:
         for name in cfg.fluent:
             ne[name].definition = cfg.fluent_expression(name)
 
-    def save_images(self, cfg: Config, images_dir: Path, title: str) -> None:
-        """Contours on the mid-planes ([images]); a failure here never loses the point."""
-        from .images import save_images
+    def run(self, cfg: Config, save_as: Path | None = None, images_dir: Path | None = None,
+            fields_dir: Path | None = None, name: str = "point") -> dict:
+        """Solve one point: cfg carries the [fluent] values of this point.
 
-        im = cfg.images
-        try:
-            save_images(self.session, images_dir, title, im.fields, im.planes, im.dpi, im.ranges)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Images not generated for %s: %s", images_dir, e)
-
-    def run(self, cfg: Config, save_as: Path | None = None, images_dir: Path | None = None) -> dict:
-        """Solve one point: cfg carries the [fluent] values of this point."""
+        Afterwards: images (<images_dir>/<field>_<plane>.png) and ML fields
+        (<fields_dir>/<plane>/<name>.npz), see postprocess.py."""
         s = cfg.solver
         sol = self.session.settings.solution
         self.set_inputs(cfg)
@@ -195,9 +189,7 @@ class FluentRunner:
             save_as.parent.mkdir(parents=True, exist_ok=True)
             self.session.settings.file.write(file_type="case-data", file_name=str(save_as.resolve()))
             result["case_data"] = str(save_as)
-        if cfg.images.enabled and images_dir is not None:
-            title = ", ".join(f"{k} = {v:g}" for k, v in {**cfg.cad, **cfg.fluent}.items())
-            self.save_images(cfg, images_dir, title)
-            result["images"] = str(images_dir)
+        from .postprocess import postprocess
+        result.update(postprocess(self.session, cfg, name, images_dir, fields_dir))
         log.info("Result: %s", result)
         return result
