@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from autocfd.config import load_config
-from autocfd.images import FIELDS, KELVIN, PLANES, plot_plane, triangulate
+from autocfd.images import (FIELDS, KELVIN, N_TICKS, PLANES, TICK_FORMAT, colorbar_ticks,
+                             color_limits, plot_plane, triangulate)
 from tests.test_config import CONFIG
 
 
@@ -13,7 +14,7 @@ def test_triangulate_polygons():
 
 
 def test_temperature_is_plotted_in_celsius():
-    assert FIELDS["temperature"].unit == "°C"
+    assert FIELDS["temperature"].label == "Static Temperature [C]"
     assert FIELDS["temperature"].convert(np.array([KELVIN + 25.0]))[0] == pytest.approx(25.0)
     assert not FIELDS["temperature"].fluid_only          # cells are shown
     assert FIELDS["pressure"].fluid_only and FIELDS["velocity"].fluid_only
@@ -40,3 +41,16 @@ def test_images_config():
     cfg = load_config(CONFIG)
     assert set(cfg.images.fields) == {"temperature", "pressure", "velocity"}
     assert set(cfg.images.planes) == {"xy", "yz", "xz"}
+
+
+def test_colorbar_has_11_ticks_min_to_max_one_decimal():
+    ticks = colorbar_ticks(20.0, 23.3)
+    assert N_TICKS == 11 and len(ticks) == 11
+    assert ticks[0] == 20.0 and ticks[-1] == pytest.approx(23.3)
+    assert [TICK_FORMAT % t for t in ticks[:3]] == ["20.0", "20.3", "20.7"]
+
+
+def test_color_limits_field_or_fixed_range():
+    data = np.array([-15.2, 3.0, 37.8])
+    assert color_limits(data, None) == (-15.2, 37.8)   # jet from min to max, no symmetry
+    assert color_limits(data, (0.0, 40.0)) == (0.0, 40.0)

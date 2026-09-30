@@ -11,6 +11,13 @@ The field values come from PyFluent field data, always in SI (K, Pa, m/s) whatev
 the display units of the case, and are converted here: temperature is ALWAYS
 plotted in °C. The images are drawn with matplotlib, one PNG per field and plane:
 <images_dir>/<field>_<plane>.png.
+
+Figure style (Fluent-like contours):
+- colormap "jet" (blue = minimum, red = maximum);
+- vertical colorbar on the LEFT, with "<Variable> [unit]" above it;
+- 11 equally spaced ticks from the minimum to the maximum, format "%.1f";
+- white background, no grid; solids outside the plotted domain stay white;
+- titles use commas/colons, never dashes.
 """
 
 from __future__ import annotations
@@ -25,13 +32,11 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 KELVIN = 273.15
-
-# Colors (project palette): ink, grid, surface; sequential ramps light -> dark
-INK, INK_2, MUTED, SURFACE = "#0b0b0b", "#52514e", "#898781", "#fcfcfb"
-BLUE_RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
-ORANGE_RAMP = ["#fde3d6", "#f9c3a8", "#f4a07a", "#eb6834", "#c9501f", "#9c3a12", "#6e270a"]
-# Diverging blue <-> red around a neutral gray midpoint (0 Pa gauge)
-DIVERGING = ["#0d366b", "#256abf", "#6da7ec", "#cde2fb", "#f0efec", "#f9d3d2", "#f09a99", "#e34948", "#9e2423"]
+CMAP = "jet"
+N_TICKS = 11
+TICK_FORMAT = "%.1f"
+INK, INK_2 = "#000000", "#333333"
+BACKGROUND = "#ffffff"
 
 
 @dataclass(frozen=True)
@@ -41,14 +46,16 @@ class Field:
     unit: str
     convert: Callable[[np.ndarray], np.ndarray]
     fluid_only: bool
-    colors: list[str]
-    diverging: bool = False
+
+    @property
+    def label(self) -> str:
+        return f"{self.title} [{self.unit}]"
 
 
 FIELDS = {
-    "temperature": Field("temperature", "Temperature", "°C", lambda v: v - KELVIN, False, ORANGE_RAMP),
-    "pressure": Field("pressure", "Static pressure (gauge)", "Pa", lambda v: v, True, DIVERGING, True),
-    "velocity": Field("velocity-magnitude", "Velocity magnitude", "m/s", lambda v: v, True, BLUE_RAMP),
+    "temperature": Field("temperature", "Static Temperature", "C", lambda v: v - KELVIN, False),
+    "pressure": Field("pressure", "Static Pressure", "Pa", lambda v: v, True),
+    "velocity": Field("velocity-magnitude", "Velocity Magnitude", "m/s", lambda v: v, True),
 }
 
 # plane -> (normal axis, horizontal axis, vertical axis); y (the height) is vertical
@@ -129,11 +136,18 @@ class PlaneCutter:
 
 
 # ------------------------------------------------------------------ plotting
-def _style(ax) -> None:
-    ax.set_facecolor(SURFACE)
-    for side in ax.spines.values():
-        side.set_visible(False)
-    ax.tick_params(colors=MUTED, labelsize=8, length=0)
+def color_limits(data: np.ndarray, value_range: tuple[float, float] | None) -> tuple[float, float]:
+    """Min/max of the color scale: the fixed range if given, else the field's own."""
+    if value_range is not None:
+        return float(value_range[0]), float(value_range[1])
+    vmin, vmax = float(np.nanmin(data)), float(np.nanmax(data))
+    if vmax - vmin < 1e-12:
+        vmax = vmin + 1e-12
+    return vmin, vmax
+
+
+def colorbar_ticks(vmin: float, vmax: float) -> np.ndarray:
+    return np.linspace(vmin, vmax, N_TICKS)
 
 
 def plot_plane(verts_m: np.ndarray, tris: np.ndarray, values: np.ndarray, plane: str, field: Field,
@@ -142,45 +156,60 @@ def plot_plane(verts_m: np.ndarray, tris: np.ndarray, values: np.ndarray, plane:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.colors import LinearSegmentedColormap, Normalize
+    from matplotlib.colors import Normalize
+    from matplotlib.ticker import FormatStrFormatter
     from matplotlib.tri import Triangulation
 
     _, h, v = PLANES[plane]
     x, y = verts_m[:, h] * 1000, verts_m[:, v] * 1000
     data = field.convert(values)
-    if value_range is not None:
-        vmin, vmax = value_range
-    elif field.diverging:  # symmetric around 0 so that the gray midpoint is 0
-        vmax = float(np.nanmax(np.abs(data))) or 1.0
-        vmin = -vmax
-    else:
-        vmin, vmax = float(np.nanmin(data)), float(np.nanmax(data))
-        if vmax - vmin < 1e-12:
-            vmax = vmin + 1e-12
-    cmap = LinearSegmentedColormap.from_list(field.fluent_name, field.colors)
+    vmin, vmax = color_limits(data, value_range)
 
+    # Layout in inches: [colorbar + its labels] [plot], title block on top
     span_h, span_v = np.ptp(x) or 1.0, np.ptp(y) or 1.0
-    width = 9.0
-    fig, ax = plt.subplots(figsize=(width, max(2.4, width * span_v / span_h * 0.85 + 1.2)), facecolor=SURFACE)
-    tpc = ax.tripcolor(Triangulation(x, y, tris), data, cmap=cmap, norm=Normalize(vmin, vmax),
+    cbar_left, cbar_w, plot_left, right = 0.45, 0.25, 2.1, 0.35
+    plot_w = 10.0 - plot_left - right
+    plot_h = plot_w * span_v / span_h
+    if plot_h > 6.0:  # tall planes: limit the height, narrow the plot
+        plot_h, plot_w = 6.0, 6.0 * span_h / span_v
+    cbar_h = max(plot_h, 3.2)
+    top, bottom = 1.15, 0.65
+    fig_w, fig_h = plot_left + plot_w + right, cbar_h + top + bottom
+
+    fig = plt.figure(figsize=(fig_w, fig_h), facecolor=BACKGROUND)
+    ax = fig.add_axes([plot_left / fig_w, (bottom + (cbar_h - plot_h) / 2) / fig_h,
+                       plot_w / fig_w, plot_h / fig_h])
+    cax = fig.add_axes([cbar_left / fig_w, bottom / fig_h, cbar_w / fig_w, cbar_h / fig_h])
+
+    tpc = ax.tripcolor(Triangulation(x, y, tris), data, cmap=CMAP, norm=Normalize(vmin, vmax),
                        shading="gouraud", rasterized=True)
+    ax.set_facecolor(BACKGROUND)
     ax.set_aspect("equal")
+    ax.set_xlim(x.min(), x.max())
+    ax.set_ylim(y.min(), y.max())
+    ax.grid(False)
     ax.set_xlabel(f"{AXIS_NAMES[h]} [mm]", fontsize=9, color=INK_2)
     ax.set_ylabel(f"{AXIS_NAMES[v]} [mm]", fontsize=9, color=INK_2)
+    ax.tick_params(labelsize=8, colors=INK_2)
+
+    cb = fig.colorbar(tpc, cax=cax, orientation="vertical")
+    cb.set_ticks(colorbar_ticks(vmin, vmax))
+    cb.ax.yaxis.set_major_formatter(FormatStrFormatter(TICK_FORMAT))
+    cb.ax.tick_params(labelsize=8, colors=INK)
+    fig.text(cbar_left / fig_w, (bottom + cbar_h + 0.12) / fig_h, field.label,
+             ha="left", va="bottom", fontsize=9, color=INK)
+
     normal = AXIS_NAMES[PLANES[plane][0]]
     lo, hi = float(np.nanmin(data)), float(np.nanmax(data))
-    ax.set_title(f"{field.title} — plane {plane} ({normal} = {plane_pos_mm:.1f} mm)", fontsize=10,
-                 color=INK, loc="left", pad=22)
-    ax.text(0.0, 1.02, f"{title}    min {lo:.4g}  max {hi:.4g} {field.unit}", transform=ax.transAxes,
-            ha="left", va="bottom", fontsize=8, color=INK_2)
-    _style(ax)
-    cb = fig.colorbar(tpc, ax=ax, fraction=0.04, pad=0.02)
-    cb.set_label(field.unit, fontsize=9, color=INK_2)
-    cb.ax.tick_params(labelsize=8, colors=INK_2, length=0)
-    cb.outline.set_visible(False)
-    fig.tight_layout()
+    fig.text(cbar_left / fig_w, 1 - 0.25 / fig_h,
+             f"{field.title}, plane {plane} ({normal} = {plane_pos_mm:.1f} mm)",
+             ha="left", va="top", fontsize=11, color=INK)
+    fig.text(cbar_left / fig_w, 1 - 0.55 / fig_h,
+             f"{title};  min: {lo:.1f} {field.unit}, max: {hi:.1f} {field.unit}",
+             ha="left", va="top", fontsize=8, color=INK_2)
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=dpi, facecolor=SURFACE)
+    fig.savefig(path, dpi=dpi, facecolor=BACKGROUND)
     plt.close(fig)
 
 

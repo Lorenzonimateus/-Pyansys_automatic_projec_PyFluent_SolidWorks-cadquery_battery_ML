@@ -106,8 +106,11 @@ the field, so everything saved is in **°C**, independent of the case's display 
 **Images.** After each point (`solve`, `study`, `optimize`) three planes through
 the **centre of the domain** are cut: `xy` (z = z_mid), `yz` (x = x_mid) and
 `xz` (y = y_mid). Temperature (°C) is cut through the fluid and the cells,
-pressure (gauge Pa, diverging scale around 0) and velocity magnitude (m/s)
-through the fluid only. One PNG per field and plane:
+static pressure (gauge Pa) and velocity magnitude (m/s) through the fluid only
+(the cells stay white). Fluent-like style: `jet` colormap (blue = minimum, red =
+maximum), vertical colorbar on the left with "Static Temperature [C]" (etc.)
+above it, 11 equally spaced ticks from min to max in `%.1f`, white background,
+no grid. One PNG per field and plane:
 `output/studies/<name>/images/dpNNN/<field>_<plane>.png` (and
 `output/single/images/<case>/`). By default each image is scaled to its own
 min/max; set `[images] ranges` to use the same scale for every point.
