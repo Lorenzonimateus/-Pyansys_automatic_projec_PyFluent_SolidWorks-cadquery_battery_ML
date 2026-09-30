@@ -182,7 +182,7 @@ class FluentRunner:
             log.warning("Point %s did NOT converge in %d iterations", cfg.fluent, iters)
 
         values, oscillation = window_average(samples, max(1, s.average_window // s.sample_every))
-        result = {**values, **derived_outputs(cfg, values),
+        result = {**cfg.heat_inputs(), **values, **derived_outputs(cfg, values),
                   **{f"{k}_osc": oscillation[k] for k in s.monitor},
                   "iterations": iters, "converged": converged}
         if s.save_case_data and save_as is not None:

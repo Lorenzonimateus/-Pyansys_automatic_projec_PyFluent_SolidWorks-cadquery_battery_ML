@@ -16,9 +16,11 @@ log = logging.getLogger(__name__)
 
 
 def point_params(cfg: Config) -> dict[str, float]:
-    """Parameters that define a point: [cad] + [fluent] values."""
+    """Parameters that define a point: [cad] + [fluent] values (+ C-rate when
+    [operating] drives the heat source)."""
+    extra = {"operating.c_rate": cfg.operating.c_rate} if cfg.operating.heat_source else {}
     return {**{f"cad.{k}": v for k, v in cfg.cad.items()},
-            **{f"fluent.{k}": v for k, v in cfg.fluent.items()}}
+            **{f"fluent.{k}": v for k, v in cfg.fluent.items()}, **extra}
 
 
 def postprocess_saved(cfg: Config, single: bool = False) -> int:
@@ -42,13 +44,15 @@ def postprocess_saved(cfg: Config, single: bool = False) -> int:
     if df.empty:
         raise FileNotFoundError(f"No saved case + data listed in {csv}")
 
-    param_cols = [c for c in df.columns if c.split(".", 1)[0] in ("cad", "fluent")]
+    param_cols = [c for c in df.columns if c.split(".", 1)[0] in ("cad", "fluent", "operating")]
+    if cfg.operating.heat_source:  # derived from the C-rate, recomputed by with_overrides
+        param_cols = [c for c in param_cols if c != f"fluent.{cfg.operating.heat_source}"]
     session = launch(cfg, "solver", cfg.solver.processors, root / "work")
     try:
         for _, row in df.iterrows():
             case = Path(row["case_data"])
             name = case.name.replace(".cas.h5", "")
-            pcfg = cfg.with_overrides({c: row[c] for c in param_cols})
+            pcfg = cfg.with_overrides({c: row[c] for c in param_cols if pd.notna(row[c])})
             session.settings.file.read_case_data(file_name=str(case.resolve()))
             done = postprocess(session, pcfg, name, root / "images" / name, root / "ml_fields")
             log.info("%s: %s", name, done or "nothing written")

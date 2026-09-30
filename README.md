@@ -100,6 +100,14 @@ oscillates about ±1 % while `t_max` settles. The reports are therefore sampled 
 results are averages over the last `average_window` iterations, and the relative
 oscillation of each monitored report is saved as `<name>_osc`.
 
+**Operating point (C-rate).** With `[operating] heat_source` set, the Fluent named
+expression `parameter_heat_source_wperm3` is **computed** for every point, like in
+the P50B project: heat per cell Q = (C·Ah)²·R_DC, and q = Q / V_cell in W/m³ with
+V_cell = π(D/2)²·h, where D is the current value of `cad.D` (so the same C-rate
+gives the same watts per cell whatever the diameter). Vary `operating.c_rate` in
+`[study.parameters]`; the heat source itself cannot be a study parameter. Each
+result stores `Q_cell_W` and `q_W_m3`; the C-rate does not change the mesh.
+
 **Units.** PyFluent always returns the reports and field data in **SI** (temperature
 in K, pressure in Pa), even when the case shows °C in the GUI. The `[outputs]`
 convert the temperatures (`t_max - 273.15` → `T_max_C`) and the images convert
@@ -194,9 +202,8 @@ output/
   extrusions have a fixed 70.15 mm): link it in SolidWorks before using `cad.H`.
 - With the current layout, the mid-plane `yz` (x_mid) falls in the gap between the
   2nd and 3rd columns of cells: it shows the air between them, not a cell section.
-- The heat source is a volumetric value (W/m³): if `cad.D` changes, the heat per cell
-  changes with the cell volume. To keep the heat per cell constant, define the
-  source in Fluent as an expression of the power and the zone volume.
+- **Steady state.** At high C-rates the discharge lasts minutes, so the steady-state
+  temperature is conservative (overestimated); a transient run is the next step there.
 
 ## Tests
 

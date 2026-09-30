@@ -46,6 +46,20 @@ parameter_heat_source_wperm3 = 40400.0    # W/m^3
 parameter_velocity_inlet = "m/s"
 parameter_heat_source_wperm3 = "W/m^3"
 
+# Battery operating point -> heat source of the Fluent case (like the P50B project).
+# Heat per cell Q = (c_rate * capacity_ah)^2 * r_dc_ohm  [W]
+# Fluent input  q = Q / V_cell  [W/m^3],  V_cell = pi (D/2)^2 * cell_height
+# D is read from `diameter` (the cad parameter), so q follows the geometry.
+# The value of [fluent] parameter_heat_source_wperm3 is then COMPUTED, not read:
+# vary operating.c_rate in the study, not the heat source.
+[operating]
+c_rate = 1.8                 # nominal; 1.8C ~ 4.04e4 W/m^3 of the base case (D = 21.55)
+capacity_ah = 5.0
+r_dc_ohm = 0.0128            # DC resistance at 50% SOC (Molicel P50B datasheet)
+cell_height_mm = 70.15       # extrusion height of the cells in the part
+diameter = "cad.D"
+heat_source = "parameter_heat_source_wperm3"
+
 [solver]
 processors = 16
 mpi = "intel"              # "" for Fluent's default MPI
@@ -100,8 +114,8 @@ dpi = 150
 [ml_fields]
 enabled = true
 planes = ["xy", "yz", "xz"]
-# Grid bounds in mm: must contain the domain of EVERY geometry of the study
-# (base case: x 0..309, y 0..70.15, z -99.7..0). A warning is logged otherwise.
+# Grid bounds in mm: must contain the domain of EVERY geometry of the study.
+# With D = 22 and L1, P1 in [2, 10]: x 0..303-309.4, y 0..70.15, z -73.6..-100.8 to 0.
 x_mm = [0.0, 330.0]
 y_mm = [0.0, 70.15]
 z_mm = [-110.0, 0.0]
@@ -109,27 +123,29 @@ resolution = [256, 64, 128]      # points along x, y, z (xz plane = 256 x 128)
 
 # Fixed limits for the WHOLE dataset (never per image): value -> (v - min)/(max - min).
 # A warning is logged when a case goes outside them. Units: °C, Pa, m/s.
+# Up to 10C (32 W per cell) at 1 m/s the cells can pass 150 °C in steady state;
+# after the study, tighten the limits to the data and run `postprocess`.
 [ml_fields.normalization]
-temperature = [20.0, 60.0]
+temperature = [20.0, 250.0]
 pressure = [-200.0, 300.0]
 velocity = [0.0, 30.0]
 
 # Design of experiments (LHS). Parameter names are "section.name".
 # cad.* and mesh.* change the geometry/mesh (one mesh per distinct geometry);
-# fluent.* only change the Fluent inputs and reuse the mesh.
+# fluent.* and operating.* only change the Fluent inputs and reuse the mesh.
 # [min, max] = sampled range;  [value] = fixed for the whole study (not sampled).
 [study]
-name = "doe_v1"
-samples = 30
+name = "doe_crate"
+samples = 40
 seed = 42
 outputs = ["T_max_C", "dT_cells_K", "dP_Pa"]
 
 [study.parameters]
 "cad.D" = [22.0]
-"cad.L1" = [1, 10]
-"cad.P1" = [1, 10]
-
-"fluent.parameter_velocity_inlet" = [1.0, 8.0]
+"cad.L1" = [2, 10]
+"cad.P1" = [2, 10]
+"operating.c_rate" = [1.0, 10.0]
+"fluent.parameter_velocity_inlet" = [1.0, 7.0]
 
 # Surrogate-based optimization: Gaussian process + expected improvement.
 # Each iteration picks the most promising point, runs it in CFD, adds it to

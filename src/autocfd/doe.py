@@ -35,7 +35,7 @@ def latin_hypercube(bounds: dict[str, tuple[float, float]], n: int, seed: int) -
     lo = np.array([bounds[k][0] for k in names])
     hi = np.array([bounds[k][1] for k in names])
     unit = qmc.LatinHypercube(d=len(names), seed=seed).random(n)
-    pts = qmc.scale(unit, lo, hi)
+    pts = np.round(qmc.scale(unit, lo, hi), 1)  # 1 decimal place: readable plan, CAD-friendly values
     return [dict(zip(names, map(float, row))) for row in pts]
 
 

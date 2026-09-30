@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 # Sections whose values change the geometry/mesh (a new case directory per combination).
 GEOMETRY_SECTIONS = ("cad", "mesh")
 # Sections that accept "section.name" overrides and study parameters.
-PARAMETER_SECTIONS = ("cad", "mesh", "fluent")
+PARAMETER_SECTIONS = ("cad", "mesh", "fluent", "operating")
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,22 @@ class Solver:
     rel_tol: float = 2e-3
     average_window: int = 200
     save_case_data: bool = True
+
+
+@dataclass(frozen=True)
+class Operating:
+    """Battery operating point -> volumetric heat source of the Fluent case.
+
+    Q per cell = (c_rate * capacity_ah)^2 * r_dc_ohm; the Fluent named expression
+    `heat_source` receives Q / V_cell in W/m^3, with V_cell = pi (D/2)^2 h and D
+    read from the parameter `diameter` (so it follows the geometry). Inactive
+    when heat_source is empty."""
+    c_rate: float = 1.0
+    capacity_ah: float = 5.0
+    r_dc_ohm: float = 0.0128
+    cell_height_mm: float = 70.15
+    diameter: str = "cad.D"
+    heat_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -111,6 +128,7 @@ class Config:
     fluent: dict[str, float] = field(default_factory=dict)
     fluent_units: dict[str, str] = field(default_factory=dict)
     solver: Solver = field(default_factory=Solver)
+    operating: Operating = field(default_factory=Operating)
     outputs: dict[str, str] = field(default_factory=dict)
     images: Images = field(default_factory=Images)
     ml_fields: MLFields = field(default_factory=MLFields)
@@ -135,6 +153,29 @@ class Config:
 
     def case_dir(self) -> Path:
         return self.output_dir / "cases" / self.geometry_key()
+
+    # ----------------------------------------------------------- operating point
+    def cell_volume_m3(self) -> float:
+        d_mm = self.get(self.operating.diameter)
+        return math.pi * (d_mm / 2000.0) ** 2 * (self.operating.cell_height_mm / 1000.0)
+
+    def cell_heat_w(self) -> float:
+        """Joule heat per cell, Q = (C * Ah)^2 * R_DC."""
+        op = self.operating
+        return (op.c_rate * op.capacity_ah) ** 2 * op.r_dc_ohm
+
+    def heat_inputs(self) -> dict[str, float]:
+        """Derived values saved with each result (empty when [operating] is inactive)."""
+        if not self.operating.heat_source:
+            return {}
+        return {"Q_cell_W": self.cell_heat_w(), "q_W_m3": self.cell_heat_w() / self.cell_volume_m3()}
+
+    def _with_derived(self) -> "Config":
+        """Write the volumetric heat of the operating point into its Fluent named expression."""
+        if not self.operating.heat_source:
+            return self
+        q = self.cell_heat_w() / self.cell_volume_m3()
+        return dataclasses.replace(self, fluent={**self.fluent, self.operating.heat_source: q})
 
     def fluent_expression(self, name: str) -> str:
         """Definition string of a Fluent named expression, e.g. '3.0 [m/s]'."""
@@ -169,7 +210,8 @@ class Config:
                 if ftype is int:
                     value = round(float(value))
                 cfg = dataclasses.replace(cfg, **{section: dataclasses.replace(sub, **{name: ftype(value)})})
-        return cfg
+        # The heat source always follows the operating point (C-rate, diameter)
+        return cfg._with_derived()
 
 
 def is_geometric(parameter: str) -> bool:
@@ -217,6 +259,7 @@ def load_config(path: str | Path) -> Config:
         fluent={k: float(v) for k, v in raw.get("fluent", {}).items()},
         fluent_units=dict(raw.get("fluent_units", {})),
         solver=_build(Solver, raw.get("solver", {})),
+        operating=_build(Operating, raw.get("operating", {})),
         outputs=dict(raw.get("outputs", {})),
         images=_build(Images, {**images_raw, "ranges": ranges}),
         ml_fields=_build(MLFields, mlf_raw),
@@ -226,7 +269,16 @@ def load_config(path: str | Path) -> Config:
     for k in fixed:
         if k.split(".", 1)[0] not in PARAMETER_SECTIONS:
             raise KeyError(f"Study parameter {k!r} must be in one of {PARAMETER_SECTIONS}")
-    cfg = cfg.with_overrides(fixed)  # fixed study values replace the nominal ones
+    op = cfg.operating
+    if op.heat_source:
+        if op.heat_source not in cfg.fluent:
+            raise KeyError(f"[operating] heat_source {op.heat_source!r} is not in [fluent]")
+        driven = f"fluent.{op.heat_source}"
+        if driven in params or driven in fixed:
+            raise ValueError(f"{driven} is computed from [operating] (C-rate); vary "
+                             "operating.c_rate in [study.parameters] instead")
+        cfg.get(op.diameter)  # validates the diameter parameter
+    cfg = cfg.with_overrides(fixed)  # fixed study values replace the nominal ones; derives the heat
     validate(cfg)
     return cfg
 

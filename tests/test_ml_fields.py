@@ -94,7 +94,7 @@ def test_write_plane_and_load_dataset(tmp_path):
 def test_default_config_ml_fields():
     ml = load_config(CONFIG).ml_fields
     assert ml.resolution == (256, 64, 128)
-    assert ml.normalization["temperature"] == (20.0, 60.0)
+    assert ml.normalization["temperature"] == (20.0, 250.0)
 
 
 def test_rasterize_tolerates_duplicates_and_degenerate_triangles():
