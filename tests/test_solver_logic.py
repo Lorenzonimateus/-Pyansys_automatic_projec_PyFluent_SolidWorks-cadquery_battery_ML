@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from autocfd.config import load_config
 from autocfd.solver import block_converged, derived_outputs, window_average
@@ -38,3 +39,5 @@ def test_derived_outputs():
            "p_in": 30.0, "p_out": 0.0, "m_out": 0.01}
     out = derived_outputs(cfg, rep)
     assert out["dP_Pa"] == 30.0 and out["dT_cells_K"] == 10.0
+    # reports come in K from PyFluent: the *_C outputs must be Celsius
+    assert out["T_max_C"] == pytest.approx(36.85) and out["T_out_C"] == pytest.approx(25.85)

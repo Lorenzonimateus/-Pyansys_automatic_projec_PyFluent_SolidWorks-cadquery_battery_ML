@@ -39,6 +39,7 @@ autocfd solve --set cad.D=20 --set fluent.parameter_velocity_inlet=5
 autocfd solve --base                   # base case as it is (checks the solver settings)
 autocfd study --dry-run                # LHS plan and geometry groups
 autocfd study                          # run the DOE (resumable)
+autocfd images output/single/<case>.cas.h5   # (re)generate the images of saved cases
 autocfd analyze                        # sensitivity: Sobol indices, CoP, response surfaces
 autocfd train                          # ML model, leave-one-out validation
 autocfd optimize                       # Bayesian optimization with CFD verification
@@ -97,6 +98,20 @@ oscillates about ±1 % while `t_max` settles. The reports are therefore sampled 
 results are averages over the last `average_window` iterations, and the relative
 oscillation of each monitored report is saved as `<name>_osc`.
 
+**Units.** PyFluent always returns the reports and field data in **SI** (temperature
+in K, pressure in Pa), even when the case shows °C in the GUI. The `[outputs]`
+convert the temperatures (`t_max - 273.15` → `T_max_C`) and the images convert
+the field, so everything saved is in **°C**, independent of the case's display units.
+
+**Images.** After each point (`solve`, `study`, `optimize`) three planes through
+the **centre of the domain** are cut: `xy` (z = z_mid), `yz` (x = x_mid) and
+`xz` (y = y_mid). Temperature (°C) is cut through the fluid and the cells,
+pressure (gauge Pa, diverging scale around 0) and velocity magnitude (m/s)
+through the fluid only. One PNG per field and plane:
+`output/studies/<name>/images/dpNNN/<field>_<plane>.png` (and
+`output/single/images/<case>/`). By default each image is scaled to its own
+min/max; set `[images] ranges` to use the same scale for every point.
+
 **Failures.** A point whose geometry fails (SolidWorks rebuild error, meshing error)
 is written to `results.csv` with `status = geometry_failed` and the study goes on; a
 Fluent failure gives `solve_failed` and the session is restarted. Only `status = ok`
@@ -113,10 +128,12 @@ output/
     mesh.msh.h5
     params.json               [cad] + [mesh] that produced it
   single_runs.csv           results of `solve`
+  single/images/<case>/     images of each `solve`
   studies/<name>/
     design.csv                LHS plan
     results.csv               one row per point, written as soon as it finishes
     points/dpNNN.cas.h5       case + data of each point
+    images/dpNNN/             temperature/pressure/velocity on the planes xy, yz, xz
     sensitivity.csv, sensitivity_sobol.png, response_surfaces.png
     ml_model.joblib, ml_metrics.csv, ml_parity.png
     optimization.csv          each optimization iteration: proposal, prediction, CFD result
@@ -137,8 +154,8 @@ output/
 
 - The SolidWorks global variable **`H` is not linked** to any dimension (both
   extrusions have a fixed 70.15 mm): link it in SolidWorks before using `cad.H`.
-- The reports are in **SI units** (`t_*` in K, `p_*` in Pa), whatever the display units
-  of the case.
+- With the current layout, the mid-plane `yz` (x_mid) falls in the gap between the
+  2nd and 3rd columns of cells: it shows the air between them, not a cell section.
 - The heat source is a volumetric value (W/m³): if `cad.D` changes, the heat per cell
   changes with the cell volume. To keep the heat per cell constant, define the
   source in Fluent as an expression of the power and the zone volume.

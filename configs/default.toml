@@ -50,24 +50,47 @@ parameter_heat_source_wperm3 = "W/m^3"
 processors = 16
 mpi = "intel"              # "" for Fluent's default MPI
 start_timeout_s = 300
-# Report definitions of the base case that are read after each run (SI units).
+# Report definitions of the base case that are read after each run.
+# PyFluent ALWAYS returns them in SI (temperature in K, pressure in Pa), whatever
+# units are selected in the Fluent GUI (the case shows °C, the API still gives K).
 reports = ["t_max", "t_min", "t_avg", "t_out", "p_in", "p_out", "m_out"]
-# Convergence: iterate in blocks and stop when the monitored reports settle.
+# Convergence: the reports are sampled every sample_every iterations; after each
+# block of check_every iterations, the block AVERAGE of each monitored report is
+# compared with the previous block (the flow behind the cells keeps a small
+# oscillation that never dies out, but its mean settles).
+# Results = average over the last average_window iterations; the relative
+# oscillation of each monitored report is saved as <name>_osc.
 monitor = ["t_max", "p_in"]
-min_iterations = 150
+min_iterations = 200
 max_iterations = 500
 check_every = 50
-rel_tol = 1e-4             # max |change| / |value| of each monitored report between blocks
+sample_every = 10
+rel_tol = 2e-3             # max |change| / |value| of the block averages
+average_window = 200
 save_case_data = true
 
 # Outputs derived from the reports (numpy expressions over the report names).
 # They become columns of results.csv and can be used by the study, ML and optimizer.
+# Temperatures: the reports are in K (see above), so -273.15 gives °C always.
 [outputs]
-T_max_C = "t_max "
-T_avg_C = "t_avg "
+T_max_C = "t_max - 273.15"
+T_avg_C = "t_avg - 273.15"
 dT_cells_K = "t_max - t_min"
 dP_Pa = "p_in - p_out"
-T_out_C = "t_out "
+T_out_C = "t_out - 273.15"
+
+# Contour images of each solved point on the three mid-planes of the domain
+# (xy at z_mid, yz at x_mid, xz at y_mid). Temperature always in °C, pressure in
+# Pa (gauge), velocity in m/s. Saved as <field>_<plane>.png in
+#   output/studies/<name>/images/dpNNN/   and   output/single/images/<case>/
+[images]
+enabled = true
+fields = ["temperature", "pressure", "velocity"]
+planes = ["xy", "yz", "xz"]
+dpi = 150
+# Fixed color ranges make the images of different points comparable; leave a
+# field out to scale each image to its own min/max. Units as in the images.
+# ranges = { temperature = [20.0, 40.0], velocity = [0.0, 8.0] }
 
 # Design of experiments (LHS). Parameter names are "section.name".
 # cad.* and mesh.* change the geometry/mesh (one mesh per distinct geometry);

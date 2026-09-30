@@ -76,7 +76,7 @@ def run_single(cfg: Config, use_base_mesh: bool = False) -> dict:
     tag = "base" if use_base_mesh else cfg.geometry_key()
     tag += "_" + "_".join(f"{v:g}" for v in cfg.fluent.values())
     with FluentRunner(cfg, mesh, work) as f:
-        result = f.run(cfg, save_as=work / f"{tag}.cas.h5")
+        result = f.run(cfg, save_as=work / f"{tag}.cas.h5", images_dir=work / "images" / tag)
     append_csv(cfg.output_dir / "single_runs.csv",
                {"geometry": tag.split("_")[0], **{f"cad.{k}": v for k, v in cfg.cad.items()},
                 **{f"fluent.{k}": v for k, v in cfg.fluent.items()}, **result})

@@ -64,6 +64,15 @@ class Solver:
 
 
 @dataclass(frozen=True)
+class Images:
+    enabled: bool = True
+    fields: tuple[str, ...] = ("temperature", "pressure", "velocity")
+    planes: tuple[str, ...] = ("xy", "yz", "xz")
+    dpi: int = 150
+    ranges: dict[str, tuple[float, float]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Study:
     name: str = "study"
     samples: int = 20
@@ -91,6 +100,7 @@ class Config:
     fluent_units: dict[str, str] = field(default_factory=dict)
     solver: Solver = field(default_factory=Solver)
     outputs: dict[str, str] = field(default_factory=dict)
+    images: Images = field(default_factory=Images)
     study: Study = field(default_factory=Study)
     optimize: Optimize = field(default_factory=Optimize)
 
@@ -171,6 +181,8 @@ def load_config(path: str | Path) -> Config:
 
     study_raw = dict(raw.get("study", {}))
     params = {k: (float(v[0]), float(v[1])) for k, v in study_raw.pop("parameters", {}).items()}
+    images_raw = dict(raw.get("images", {}))
+    ranges = {k: (float(v[0]), float(v[1])) for k, v in images_raw.pop("ranges", {}).items()}
     cfg = Config(
         paths=_build(Paths, raw.get("paths", {})),
         cad={k: float(v) for k, v in raw.get("cad", {}).items()},
@@ -180,6 +192,7 @@ def load_config(path: str | Path) -> Config:
         fluent_units=dict(raw.get("fluent_units", {})),
         solver=_build(Solver, raw.get("solver", {})),
         outputs=dict(raw.get("outputs", {})),
+        images=_build(Images, {**images_raw, "ranges": ranges}),
         study=_build(Study, {**study_raw, "parameters": params}),
         optimize=_build(Optimize, raw.get("optimize", {})),
     )
@@ -201,6 +214,11 @@ def validate(cfg: Config) -> None:
     if s.check_every % s.sample_every or s.average_window < s.sample_every:
         raise ValueError("[solver] check_every must be a multiple of sample_every, "
                          "and average_window >= sample_every")
+    im = cfg.images
+    bad = (set(im.fields) - {"temperature", "pressure", "velocity"}) | (set(im.planes) - {"xy", "yz", "xz"})
+    if bad or set(im.ranges) - set(im.fields):
+        raise ValueError("[images] fields must be temperature/pressure/velocity, planes xy/yz/xz, "
+                         "and ranges only for listed fields")
     if cfg.spaceclaim.flow_axis not in ("x", "y", "z"):
         raise ValueError("spaceclaim.flow_axis must be 'x', 'y' or 'z'")
     if cfg.optimize.sense not in ("min", "max"):
