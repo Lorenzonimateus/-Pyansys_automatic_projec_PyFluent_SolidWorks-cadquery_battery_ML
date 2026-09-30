@@ -1,0 +1,94 @@
+"""Command line: python -m autocfd <command> [options]
+
+  inspect    list the SolidWorks global variables and the base case's named
+             expressions / report definitions (to fill [cad], [fluent], [solver])
+  geometry   SolidWorks (global variables) + SpaceClaim (named selections) -> .scdocx
+  mesh       replay the Fluent Meshing workflow (.wft) on that geometry (cached)
+  solve      one point with the values in the config (--base: base case as it is)
+  study      run the DOE defined in [study] (resumable)
+  analyze    sensitivity analysis of the study results (no Ansys)
+  train      train the Machine Learning model on the study results (no Ansys)
+  optimize   surrogate-based optimization with CFD verification ([optimize])
+  best       show the best CFD points found so far (no Ansys)
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+from pathlib import Path
+
+from .config import load_config
+
+
+def _parse_set(items: list[str]) -> dict[str, float | str]:
+    out = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise SystemExit(f"--set expects key=value, got {item!r}")
+        try:
+            out[key] = float(value)
+        except ValueError:
+            out[key] = value
+    return out
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="autocfd", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("-c", "--config", default="configs/default.toml", type=Path)
+    parser.add_argument("--set", action="append", default=[], metavar="SECTION.NAME=VALUE",
+                        help="override a config value, e.g. --set cad.D=20")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("inspect")
+    sub.add_parser("geometry")
+    sub.add_parser("mesh")
+    p_solve = sub.add_parser("solve")
+    p_solve.add_argument("--base", action="store_true", help="solve the base case mesh (no geometry/meshing)")
+    p_study = sub.add_parser("study")
+    p_study.add_argument("--dry-run", action="store_true", help="only show the plan and the geometry groups")
+    sub.add_parser("analyze")
+    sub.add_parser("train")
+    sub.add_parser("optimize")
+    sub.add_parser("best")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+                        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")
+    cfg = load_config(args.config).with_overrides(_parse_set(args.set))
+
+    if args.command == "inspect":
+        from .cad import list_parameters
+        from .inspect_case import print_case_info
+        print(f"\nSolidWorks global variables of {cfg.paths.sldprt} ([cad] section):")
+        for name, value in list_parameters(Path(cfg.paths.sldprt)).items():
+            print(f"      {name:<36} = {value:g}")
+        print_case_info(cfg.paths.base_case)
+    elif args.command == "geometry":
+        from .pipeline import ensure_geometry
+        print(ensure_geometry(cfg))
+    elif args.command == "mesh":
+        from .pipeline import ensure_mesh
+        print(ensure_mesh(cfg))
+    elif args.command == "solve":
+        from .pipeline import run_single
+        run_single(cfg, use_base_mesh=args.base)
+    elif args.command == "study":
+        from .doe import run_study
+        run_study(cfg, dry_run=args.dry_run)
+    elif args.command == "analyze":
+        from .doe import study_dir
+        from .sensitivity import analyze
+        analyze(study_dir(cfg) / "results.csv", cfg.study.parameters, list(cfg.study.outputs))
+    elif args.command == "train":
+        from .doe import study_dir
+        from .ml import train
+        train(study_dir(cfg) / "results.csv", list(cfg.study.parameters), list(cfg.study.outputs))
+    elif args.command == "optimize":
+        from .optimize import optimize
+        optimize(cfg)
+    elif args.command == "best":
+        from .optimize import report_best
+        report_best(cfg)

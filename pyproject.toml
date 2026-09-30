@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autocfd"
+version = "0.1.0"
+description = "Parametric CFD pipeline: SolidWorks -> SpaceClaim -> Fluent Meshing -> Fluent -> ML/optimization"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ansys-fluent-core>=0.35",
+    "h5py>=3.10",
+    "joblib>=1.3",
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pywin32>=306; sys_platform == 'win32'",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+autocfd = "autocfd.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+autocfd = ["scripts/*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

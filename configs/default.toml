@@ -1,0 +1,94 @@
+# Parametric CFD pipeline: SolidWorks -> SpaceClaim -> Fluent Meshing -> Fluent -> ML.
+# Relative paths are resolved from the folder the command is run in.
+# Every value can be overridden with --set section.name=value (or OVERRIDES in main.py).
+
+[paths]
+output_dir = "output"
+sldprt = "inputs/geometria_parametrizada.SLDPRT"
+mesh_workflow = "inputs/geometria_parametrizada_9_cells_workflow_files/geometria_parametrizada_9_cells.wft"
+base_case = "inputs/geometria_parametrizada_9_cells.cas.h5"
+
+# SolidWorks global variables (Tools > Equations), in mm. Only the variables listed
+# here are changed; all the others keep the value saved in the .SLDPRT.
+# NOTE: "H" (70.15) exists in the part but no dimension uses it (the extrusions have
+# a fixed 70.15), so changing H does nothing until it is linked in SolidWorks.
+[cad]
+D = 21.55      # cell diameter           -> D7@Sketch6
+L1 = 10.0      #                          -> D3@Sketch6
+P1 = 10.0      #                          -> D9@Sketch6
+
+# SpaceClaim (batch, no GUI): opens the rebuilt .SLDPRT and recreates the named
+# selections of the fluid body's faces at the ends of the flow axis.
+[spaceclaim]
+exe = "C:/Program Files/ANSYS Inc/v252/scdm/SpaceClaim.exe"
+timeout_s = 900
+fluid_body = "volume"
+flow_axis = "x"
+inlet_name = "inlet"       # face at the minimum of flow_axis
+outlet_name = "output"     # face at the maximum of flow_axis
+
+# Fluent Meshing: the saved watertight workflow (.wft) is replayed on the new
+# geometry; only these values are changed in it.
+[mesh]
+processors = 16
+min_size_mm = 0.3
+max_size_mm = 3.0
+hex_max_size_mm = 2.4
+bl_layers = 5
+
+# Fluent: the base case is read, its mesh replaced, and these named expressions
+# (input parameters of the case) are set. Values in the unit written next to them.
+[fluent]
+parameter_velocity_inlet = 3.0            # m/s
+parameter_heat_source_wperm3 = 40400.0    # W/m^3
+
+[fluent_units]
+parameter_velocity_inlet = "m/s"
+parameter_heat_source_wperm3 = "W/m^3"
+
+[solver]
+processors = 16
+mpi = "intel"              # "" for Fluent's default MPI
+start_timeout_s = 300
+# Report definitions of the base case that are read after each run (SI units).
+reports = ["t_max", "t_min", "t_avg", "t_out", "p_in", "p_out", "m_out"]
+# Convergence: iterate in blocks and stop when the monitored reports settle.
+monitor = ["t_max", "p_in"]
+min_iterations = 150
+max_iterations = 500
+check_every = 50
+rel_tol = 1e-4             # max |change| / |value| of each monitored report between blocks
+save_case_data = true
+
+# Outputs derived from the reports (numpy expressions over the report names).
+# They become columns of results.csv and can be used by the study, ML and optimizer.
+[outputs]
+T_max_C = "t_max "
+T_avg_C = "t_avg "
+dT_cells_K = "t_max - t_min"
+dP_Pa = "p_in - p_out"
+T_out_C = "t_out "
+
+# Design of experiments (LHS). Parameter names are "section.name".
+# cad.* and mesh.* change the geometry/mesh (one mesh per distinct geometry);
+# fluent.* only change the Fluent inputs and reuse the mesh.
+[study]
+name = "doe_v1"
+samples = 30
+seed = 42
+outputs = ["T_max_C", "dT_cells_K", "dP_Pa"]
+
+[study.parameters]
+"cad.D" = [18.0, 22.0]
+"cad.P1" = [6.0, 14.0]
+"fluent.parameter_velocity_inlet" = [1.0, 8.0]
+
+# Surrogate-based optimization: Gaussian process + expected improvement.
+# Each iteration picks the most promising point, runs it in CFD, adds it to
+# results.csv and retrains, so the surrogate improves where it matters.
+[optimize]
+objective = "T_max_C"
+sense = "min"                        # "min" or "max"
+constraints = ["dP_Pa <= 25"]        # "<output> <= value" or "<output> >= value"
+iterations = 8
+seed = 0

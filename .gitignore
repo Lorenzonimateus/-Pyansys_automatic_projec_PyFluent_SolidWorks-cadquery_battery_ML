@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Generated results (geometries, meshes, cases, plots, CSV)
+output/
+
+# Fluent / SolidWorks by-products
+*.trn
+fluent*.bat
+cleanup-fluent-*
+FM_*/
+~$*
