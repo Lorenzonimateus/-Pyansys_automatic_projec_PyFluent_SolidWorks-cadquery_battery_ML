@@ -79,6 +79,10 @@ class Operating:
     r_dc_ohm: float = 0.0128
     cell_height_mm: float = 70.15
     diameter: str = "cad.D"
+    # meshed cell diameter minus the CAD value: the faceted CAD import makes the meshed cells
+    # ~0.3 mm smaller, so the W/m^3 must be computed with the meshed volume for the cell to
+    # get the nominal watts (cells_export checks the heat through each cell wall)
+    diameter_offset_mm: float = 0.0
     heat_source: str = ""
 
 
@@ -203,7 +207,7 @@ class Config:
 
     # ----------------------------------------------------------- operating point
     def cell_volume_m3(self) -> float:
-        d_mm = self.get(self.operating.diameter)
+        d_mm = self.get(self.operating.diameter) + self.operating.diameter_offset_mm
         return math.pi * (d_mm / 2000.0) ** 2 * (self.operating.cell_height_mm / 1000.0)
 
     def cell_heat_w(self) -> float:

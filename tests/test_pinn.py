@@ -52,8 +52,8 @@ def test_material_read_from_case_file():
     m = case_materials(ROOT / "inputs/geometria_parametrizada_9_cells.cas.h5")
     assert sorted(m) == [f"cell_{i}" for i in range(1, 10)]
     assert m["cell_1"]["rho"] == 2775.0 and m["cell_1"]["cp"] == 1050.0
-    # as set in the base case: k = 25 along z (the cells' axis is y, see README)
-    assert (m["cell_1"]["kx"], m["cell_1"]["ky"], m["cell_1"]["kz"]) == (0.8, 0.8, 25.0)
+    # axial k = 25 along y, the cells' axis; 0.8 across the layers (x and z)
+    assert (m["cell_1"]["kx"], m["cell_1"]["ky"], m["cell_1"]["kz"]) == (0.8, 25.0, 0.8)
 
 
 def test_pinn_config():

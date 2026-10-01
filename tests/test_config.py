@@ -58,7 +58,8 @@ def test_c_rate_drives_fluent_heat_source_in_w_per_m3():
     assert cfg.operating.heat_source == "parameter_heat_source_wperm3"
     p = cfg.with_overrides({"operating.c_rate": 10.0, "cad.D": 22.0})
     q_cell = (10.0 * 5.0) ** 2 * 0.0128                        # 32 W
-    vol = 3.141592653589793 * 0.011 ** 2 * 0.07015
+    d_mesh = (22.0 + cfg.operating.diameter_offset_mm) / 1000     # meshed cell diameter
+    vol = 3.141592653589793 * (d_mesh / 2) ** 2 * 0.07015
     assert p.heat_inputs()["Q_cell_W"] == pytest.approx(q_cell)
     assert p.fluent["parameter_heat_source_wperm3"] == pytest.approx(q_cell / vol)
     assert p.fluent_expression("parameter_heat_source_wperm3").endswith("[W/m^3]")

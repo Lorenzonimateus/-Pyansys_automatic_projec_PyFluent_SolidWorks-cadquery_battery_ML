@@ -63,6 +63,10 @@ capacity_ah = 5.0
 r_dc_ohm = 0.0128            # DC resistance at 50% SOC (Molicel P50B datasheet)
 cell_height_mm = 70.15       # extrusion height of the cells in the part
 diameter = "cad.D"
+# The meshed cells are smaller than the CAD (faceted import): measured by a circle fit on the
+# wall nodes, D = 21.55 -> 21.28, D = 20 -> 19.70, D = 22 -> 21.68 mm. With the meshed
+# volume in the W/m^3, each cell gets the nominal (C Ah)^2 R_DC watts.
+diameter_offset_mm = -0.32
 heat_source = "parameter_heat_source_wperm3"
 
 [solver]
@@ -81,7 +85,7 @@ reports = ["t_max", "t_min", "t_avg", "t_out", "p_in", "p_out", "m_out"]
 # oscillation of each monitored report is saved as <name>_osc.
 monitor = ["t_max", "p_in"]
 min_iterations = 200
-max_iterations = 500
+max_iterations = 1000
 check_every = 50
 sample_every = 25
 rel_tol = 2e-3             # max |change| / |value| of the block averages
@@ -140,7 +144,7 @@ velocity = [0.0, 30.0]
 # fluent.* and operating.* only change the Fluent inputs and reuse the mesh.
 # [min, max] = sampled range;  [value] = fixed for the whole study (not sampled).
 [study]
-name = "doe_crate"
+name = "doe_crate_kfix"         # doe_crate: same plan, before the fixes (k axis, heat, 500 iterations)
 samples = 40
 seed = 42
 outputs = ["T_max_C", "dT_cells_K", "dP_Pa"]
