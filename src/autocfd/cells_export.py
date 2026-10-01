@@ -179,7 +179,10 @@ def export_cells(session, case_file: Path, path: Path, q_cell_w: float | None = 
         tmap = _bin(phi, yy, tf, areas, nphi, ny, y1 - y0)
         hmap = qmap / np.maximum(tmap - t_ref, 1e-3)
         t_max, t_mean = _zone_temperatures(session, zone)
-        q_gen = q_cell_w if q_cell_w is not None else q_total
+        # Heat the CFD really put in the cell = heat leaving it at steady state. It differs
+        # from the nominal Q_cell when the meshed cell volume is not pi (D/2)^2 h (here the
+        # cell is 21.68 mm for cad.D = 22), so validate_steady must use this one.
+        q_gen = q_total
         if q_cell_w is not None and abs(q_total - q_cell_w) > 0.05 * q_cell_w:
             log.warning("%s: heat through the side wall %.3f W vs generated %.3f W (%.1f%%)", zone,
                         q_total, q_cell_w, 100 * (q_total / q_cell_w - 1))
