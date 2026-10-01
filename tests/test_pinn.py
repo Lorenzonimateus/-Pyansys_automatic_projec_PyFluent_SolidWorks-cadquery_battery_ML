@@ -125,3 +125,14 @@ def test_save_and_reload_pinns(tmp_path):
     back = load_parametric_pinn(tmp_path / "par.pt", _cell())
     assert (back.c_min, back.c_max) == (1.0, 10.0)
     assert np.allclose(back.predict(pts, [100.0], 4.0), par.predict(pts, [100.0], 4.0))
+
+
+def test_adaptive_weights_are_capped():
+    from autocfd.pinn import CellPINN, PINNSettings
+
+    s = PINNSettings(width=16, depth=2, iterations=30, n_interior=64, n_side=32, n_ends=16, device="cpu",
+                     weight_update_every=5, max_weight_ratio=10.0, log_every=5)
+    p = CellPINN(_cell(), Load.constant(5.0, 720.0, 5.0, 0.0128), 293.15, s)
+    hist = p.train()
+    for row in hist:
+        assert row["w_side"] <= 10.0 * row["w_pde"] * (1 + 1e-4) and row["w_ends"] <= 10.0 * row["w_pde"] * (1 + 1e-4)

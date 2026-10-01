@@ -54,6 +54,10 @@ class PINNSettings:
     adaptive_weights: bool = True
     weight_update_every: int = 100
     weight_ema: float = 0.9
+    # cap of each weight relative to the equation's: a term that is already satisfied has a
+    # tiny gradient, and without a cap its weight explodes (seen: 5e7 for the adiabatic ends)
+    # and the network stops fitting the equation
+    max_weight_ratio: float = 1e3
     seed: int = 0
     device: str = "cuda"
     log_every: int = 500
@@ -193,6 +197,7 @@ class _CellPINNBase:
             terms = self.losses()
             if s.adaptive_weights and (it == 1 or it % s.weight_update_every == 0):
                 new = self._balanced_weights(terms, params)
+                new = torch.clamp(new, max=s.max_weight_ratio * new[0])
                 w = new if it == 1 else s.weight_ema * w + (1 - s.weight_ema) * new
             loss = sum(wi * li for wi, li in zip(w, terms))
             opt.zero_grad(set_to_none=True)
