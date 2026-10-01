@@ -1,6 +1,7 @@
-"""Post-processing of a solved point: images for people and fields for ML.
+"""Post-processing of a solved point: images for people, fields for ML and the
+cell data (h map, geometry, material) for the cell-only transient models (PINN).
 
-Both use the same cutting planes (created once in the open Fluent session, and
+Images and ML fields use the same cutting planes (created once in the open Fluent session, and
 removed at the end so they are not saved in the cases). A failure here is
 logged and never loses the point's result.
 """
@@ -23,10 +24,14 @@ def point_params(cfg: Config) -> dict[str, float]:
             **{f"fluent.{k}": v for k, v in cfg.fluent.items()}, **extra}
 
 
-def postprocess_saved(cfg: Config, single: bool = False) -> int:
-    """Redo images + ML fields of every saved point (study results.csv, or
-    single_runs.csv with single=True) in one Fluent session. The parameters of
-    each point come from its row, so the ML files match those of a live run."""
+OUTPUTS = ("images", "ml_fields", "cells")
+
+
+def postprocess_saved(cfg: Config, single: bool = False, only: set[str] | None = None) -> int:
+    """Redo images, ML fields and cell data of every saved point (study results.csv,
+    or single_runs.csv with single=True) in one Fluent session; `only` restricts it
+    to some of OUTPUTS. The parameters of each point come from its row, so the
+    files match those of a live run."""
     import pandas as pd
 
     from .doe import study_dir
@@ -54,7 +59,11 @@ def postprocess_saved(cfg: Config, single: bool = False) -> int:
             name = case.name.replace(".cas.h5", "")
             pcfg = cfg.with_overrides({c: row[c] for c in param_cols if pd.notna(row[c])})
             session.settings.file.read_case_data(file_name=str(case.resolve()))
-            done = postprocess(session, pcfg, name, root / "images" / name, root / "ml_fields")
+            want = set(OUTPUTS) if only is None else set(only)
+            done = postprocess(session, pcfg, name,
+                               root / "images" / name if "images" in want else None,
+                               root / "ml_fields" if "ml_fields" in want else None,
+                               cells_dir=root / "cells" if "cells" in want else None)
             log.info("%s: %s", name, done or "nothing written")
     finally:
         session.exit()
@@ -62,17 +71,27 @@ def postprocess_saved(cfg: Config, single: bool = False) -> int:
 
 
 def postprocess(session, cfg: Config, name: str, images_dir: Path | None,
-                fields_dir: Path | None, params: dict[str, float] | None = None) -> dict[str, str]:
-    """Write <images_dir>/<field>_<plane>.png and <fields_dir>/<plane>/<name>.npz."""
+                fields_dir: Path | None, params: dict[str, float] | None = None,
+                cells_dir: Path | None = None) -> dict[str, str]:
+    """Write <images_dir>/<field>_<plane>.png, <fields_dir>/<plane>/<name>.npz and
+    <cells_dir>/<name>.npz."""
     from .images import PlaneCutter, write_images
     from .ml_fields import write_fields
 
+    out = {}
+    if cfg.pinn.export_cells and cells_dir is not None:
+        from .cells_export import export_cells
+        try:
+            export_cells(session, Path(cfg.paths.base_case), Path(cells_dir) / f"{name}.npz",
+                         q_cell_w=cfg.heat_inputs().get("Q_cell_W"))
+            out["cells"] = str(cells_dir)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Cell data not exported for %s: %s", name, e)
     do_images = cfg.images.enabled and images_dir is not None
     do_fields = cfg.ml_fields.enabled and fields_dir is not None
     if not (do_images or do_fields):
-        return {}
+        return out
     params = params if params is not None else point_params(cfg)
-    out = {}
     try:
         cutter = PlaneCutter(session)
     except Exception as e:  # noqa: BLE001

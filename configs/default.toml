@@ -166,3 +166,24 @@ sense = "min"                        # "min" or "max"
 constraints = ["dP_Pa <= 25"]        # "<output> <= value" or "<output> >= value"
 iterations = 8
 seed = 0
+
+# Transient temperature of ONE cell during a discharge (PINN), cooled with the
+# h(phi, y) map of a solved CFD point. The steady CFD says how the air cools each
+# cell; the PINN says how hot the cell gets over time (the steady state at high
+# C-rates is never reached and overestimates the temperature).
+# After each solved point, cells/<point>.npz stores the h maps, geometry and material
+# of the 9 cells; for points solved before this existed: `postprocess --only cells`.
+# Output: output/studies/<name>/pinn/<point>/ (steady check vs CFD, PINN vs finite
+# volumes: curves, mid-height sections, metrics).
+[pinn]
+export_cells = true
+point = "dp010"                  # dp010: v = 1.3 m/s, the hottest point of doe_crate
+cell = "hottest"                 # "cell_5", "hottest" (max CFD temperature) or "all"
+c_rate = 10.0                    # constant-current discharge ...
+profile_csv = ""                 # ... or a profile: CSV with columns time_s, c_rate
+duration_s = 0                   # 0 = full discharge: 3600 / c_rate (360 s at 10C)
+initial_temperature_c = 20.0
+iterations = 20000               # ~13 min on the RTX 6000
+width = 128
+depth = 6
+device = "cuda"

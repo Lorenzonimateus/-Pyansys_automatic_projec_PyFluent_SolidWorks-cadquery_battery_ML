@@ -104,6 +104,22 @@ class MLFields:
 
 
 @dataclass(frozen=True)
+class PINN:
+    """Transient cell-only model (cell_thermal.py, pinn.py); h map from a solved point."""
+    export_cells: bool = True          # write cells/<point>.npz after each solved point
+    point: str = "dp010"               # point whose CFD gives the h map (cells/<point>.npz)
+    cell: str = "hottest"              # a zone name, "hottest" (max CFD temperature) or "all"
+    c_rate: float = 10.0               # constant-current discharge ...
+    profile_csv: str = ""              # ... or a C-rate profile: CSV with time_s, c_rate
+    duration_s: float = 0.0            # 0 = full discharge at c_rate: 3600 / c_rate
+    initial_temperature_c: float = 20.0
+    iterations: int = 20000
+    width: int = 128
+    depth: int = 6
+    device: str = "cuda"
+
+
+@dataclass(frozen=True)
 class Study:
     name: str = "study"
     samples: int = 20
@@ -135,6 +151,7 @@ class Config:
     outputs: dict[str, str] = field(default_factory=dict)
     images: Images = field(default_factory=Images)
     ml_fields: MLFields = field(default_factory=MLFields)
+    pinn: PINN = field(default_factory=PINN)
     study: Study = field(default_factory=Study)
     optimize: Optimize = field(default_factory=Optimize)
 
@@ -267,6 +284,7 @@ def load_config(path: str | Path) -> Config:
         outputs=dict(raw.get("outputs", {})),
         images=_build(Images, {**images_raw, "ranges": ranges}),
         ml_fields=_build(MLFields, mlf_raw),
+        pinn=_build(PINN, raw.get("pinn", {})),
         study=_build(Study, {**study_raw, "parameters": params}),
         optimize=_build(Optimize, raw.get("optimize", {})),
     )

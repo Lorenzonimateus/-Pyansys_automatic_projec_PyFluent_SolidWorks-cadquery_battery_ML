@@ -149,7 +149,7 @@ class FluentRunner:
             ne[name].definition = cfg.fluent_expression(name)
 
     def run(self, cfg: Config, save_as: Path | None = None, images_dir: Path | None = None,
-            fields_dir: Path | None = None, name: str = "point") -> dict:
+            fields_dir: Path | None = None, name: str = "point", cells_dir: Path | None = None) -> dict:
         """Solve one point: cfg carries the [fluent] values of this point.
 
         Afterwards: images (<images_dir>/<field>_<plane>.png) and ML fields
@@ -190,6 +190,6 @@ class FluentRunner:
             self.session.settings.file.write(file_type="case-data", file_name=str(save_as.resolve()))
             result["case_data"] = str(save_as)
         from .postprocess import postprocess
-        result.update(postprocess(self.session, cfg, name, images_dir, fields_dir))
+        result.update(postprocess(self.session, cfg, name, images_dir, fields_dir, cells_dir=cells_dir))
         log.info("Result: %s", result)
         return result

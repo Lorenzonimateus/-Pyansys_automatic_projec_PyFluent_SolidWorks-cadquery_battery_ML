@@ -22,6 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# PINN of the cells (autocfd pinn); for CUDA install torch from https://pytorch.org
+pinn = ["torch>=2.4"]
 
 [project.scripts]
 autocfd = "autocfd.cli:main"

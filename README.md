@@ -156,6 +156,29 @@ ds["params"]    # (N, P): velocity, heat source... -> vector or constant channel
 ds["targets"]   # (N, 1, 128, 256): T_norm        -> CNN output (U-Net)
 ```
 
+**Transient cell temperature (PINN).** The steady CFD tells how the air cools each
+cell; a discharge at high C-rate lasts minutes, so the steady temperature is never
+reached. The cell-only model takes the cooling from the CFD and solves the
+transient conduction in one cell:
+
+    rho cp dT/dt = div(K grad T) + q(t)        q(t) = (C(t) Ah)^2 R_DC / V
+    -K grad T . n = h(phi, y) (T - T_inlet)     on the side, adiabatic ends
+
+- `cells/<point>.npz` (written after each solved point, or `postprocess --only
+  cells`): per cell, h(phi, y) = q''/(Ts - T_inlet) from the wall heat flux and
+  temperature of the CFD, geometry, steady CFD temperatures, and the material read
+  from the case file (orthotropic K in global axes, exactly as Fluent used it).
+- `autocfd pinn` ([pinn]): (1) checks that the reduced model reproduces the CFD at
+  steady state (`steady_vs_cfd.csv`), (2) trains the PINN (no simulation data:
+  only the residuals of the equation, the Robin condition and the adiabatic ends;
+  hard initial condition; loss terms balanced by gradient norms), (3) solves the
+  same problem with implicit finite volumes and compares (`*_pinn_vs_fv.png/.csv`,
+  `*_metrics.csv`). Constant C-rate or a C(t) profile (CSV `time_s, c_rate`).
+- Assumptions: the air responds quasi-steadily and the h map holds for any C-rate
+  (constant properties: the air side is linear in the heat).
+- On a synthetic cell (10C, 360 s, 20 000 iterations, 12 min on the RTX 6000):
+  mean temperature within 0.4 K of finite volumes, T max within 2.7 K, field RMSE 1.9 K.
+
 **Failures.** A point whose geometry fails (SolidWorks rebuild error, meshing error)
 is written to `results.csv` with `status = geometry_failed` and the study goes on; a
 Fluent failure gives `solve_failed` and the session is restarted. Only `status = ok`
@@ -202,6 +225,10 @@ output/
   extrusions have a fixed 70.15 mm): link it in SolidWorks before using `cad.H`.
 - With the current layout, the mid-plane `yz` (x_mid) falls in the gap between the
   2nd and 3rd columns of cells: it shows the air between them, not a cell section.
+- **Cell conductivity axis.** The material `cell_p50b` of the base case has k = 25 W/m·K
+  along **z** and 0.8 along x and y, but the cells' axis here is **y** (inherited from
+  the P50B project, whose cells were along z): the axial conductivity is applied
+  across the cells. Fix in Fluent (k = 25 along y) and re-solve; the meshes are reused.
 - **Steady state.** At high C-rates the discharge lasts minutes, so the steady-state
   temperature is conservative (overestimated); a transient run is the next step there.
 

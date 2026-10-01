@@ -114,7 +114,7 @@ def run_single(cfg: Config, use_base_mesh: bool = False) -> dict:
     tag += "_" + "_".join(f"{v:g}" for v in cfg.fluent.values())
     with FluentRunner(cfg, mesh, work) as f:
         result = f.run(cfg, save_as=work / f"{tag}.cas.h5", images_dir=work / "images" / tag,
-                       fields_dir=work / "ml_fields", name=tag)
+                       fields_dir=work / "ml_fields", name=tag, cells_dir=work / "cells")
     append_csv(cfg.output_dir / "single_runs.csv",
                {"geometry": tag.split("_")[0], **point_params(cfg), **result})
     return result

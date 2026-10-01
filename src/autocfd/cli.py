@@ -6,7 +6,8 @@
   mesh       replay the Fluent Meshing workflow (.wft) on that geometry (cached)
   solve      one point with the values in the config (--base: base case as it is)
   study      run the DOE defined in [study] (resumable)
-  postprocess  redo images + ML fields (.npz) of every saved point of the study (--single: of solve)
+  postprocess  redo images, ML fields and cell data of every saved point of the study (--single: of solve)
+  pinn       transient temperature of a cell (PINN), cooled with the CFD h map of a point ([pinn])
   images     temperature/pressure/velocity on the mid-planes of saved cases (.cas.h5 + .dat.h5)
   analyze    sensitivity analysis of the study results (no Ansys)
   train      train the Machine Learning model on the study results (no Ansys)
@@ -55,6 +56,9 @@ def main(argv: list[str] | None = None) -> None:
                          help="compute again the points whose status is not ok")
     p_post = sub.add_parser("postprocess")
     p_post.add_argument("--single", action="store_true", help="points of single_runs.csv instead of the study")
+    p_post.add_argument("--only", nargs="+", choices=["images", "ml_fields", "cells"],
+                        help="redo only these outputs")
+    sub.add_parser("pinn")
     p_img = sub.add_parser("images")
     p_img.add_argument("cases", nargs="+", type=Path, help=".cas.h5 files (with their .dat.h5)")
     sub.add_parser("analyze")
@@ -88,7 +92,12 @@ def main(argv: list[str] | None = None) -> None:
         run_study(cfg, dry_run=args.dry_run, retry_failed=args.retry_failed)
     elif args.command == "postprocess":
         from .postprocess import postprocess_saved
-        print(f"{postprocess_saved(cfg, single=args.single)} point(s) post-processed")
+        only = set(args.only) if args.only else None
+        print(f"{postprocess_saved(cfg, single=args.single, only=only)} point(s) post-processed")
+    elif args.command == "pinn":
+        from .doe import study_dir
+        from .pinn import run_from_config
+        run_from_config(cfg, study_dir(cfg))
     elif args.command == "images":
         from .images import images_from_case
         for case in args.cases:
