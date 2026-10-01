@@ -10,9 +10,13 @@ converged CFD points (least squares in log form, standard errors, leave-one-out)
 
     log R_th = a0 + b log v + sum_i c_i g_i          log dP = d0 + e log v + sum_i f_i g_i
 
-and the inlet area A(g) = m_dot / (rho v) is fitted linearly in the geometric
-parameters (a gap may also widen the duct, so at the same velocity it gets more air).
-The geometries are then compared in three ways, all relative to a reference point:
+They give the effect of each parameter (and whether it is significant). The comparison
+itself uses Gaussian processes on the same inputs (log v, g): a cell has an internal
+conduction resistance in series with the convection, so R_th need not be monotonic
+in a gap at the same fan power, which the log-linear law cannot represent. The inlet
+area A(g) = m_dot / (rho v) is fitted linearly in the geometric parameters (a gap may
+also widen the duct, so at the same velocity it gets more air). The geometries are
+then compared in three ways, all relative to a reference point:
 
   same inlet velocity   v = v_ref                                 (how the DOE was run)
   same mass flow        v = v_ref A(g_ref) / A(g)
@@ -72,6 +76,17 @@ def fit_log_law(v: np.ndarray, G: np.ndarray, y: np.ndarray, geo_names: list[str
     return LogLaw(["log v", *geo_names], coef, np.sqrt(np.diag(cov)), float(res.std(ddof=A.shape[1])), loo_r2)
 
 
+def _fit_gp(X: np.ndarray, y: np.ndarray):
+    import warnings
+
+    from sklearn.exceptions import ConvergenceWarning
+
+    from .ml import make_model
+
+    warnings.filterwarnings("ignore", category=ConvergenceWarning)
+    return make_model(X.shape[1]).fit(X, y)
+
+
 def gp_loo_r2(X: np.ndarray, y: np.ndarray) -> float:
     """Leave-one-out R2 of a Gaussian process on the same inputs (checks the law's form)."""
     import warnings
@@ -98,13 +113,26 @@ class Analysis:
     area_coef: np.ndarray        # A = a0 + sum a_i g_i  (m2)
     area_resid: float
     r_gp_loo: float
+    dp_gp_loo: float
+    r_gp: object                 # Gaussian process: (log v, g) -> log R_th
+    dp_gp: object                # Gaussian process: (log v, g) -> log dP
     ref: dict[str, float]
     q_cell_w: float              # heat per cell at the report's C-rate
-    fan_ref_w: float
-    m_ref: float
+    fan_ref_w: float = 0.0
+    m_ref: float = 0.0
 
     def area(self, G) -> np.ndarray:
         return self.area_coef[0] + np.atleast_2d(G) @ self.area_coef[1:]
+
+    def _x(self, v, G) -> np.ndarray:
+        return np.column_stack([np.log(v), np.atleast_2d(G)])
+
+    def log_rth(self, v, G):
+        """Mean and standard deviation of log R_th (Gaussian process)."""
+        return self.r_gp.predict(self._x(v, G), return_std=True)
+
+    def dp(self, v, G) -> np.ndarray:
+        return np.exp(self.dp_gp.predict(self._x(v, G)))
 
     def velocity_for(self, criterion: str, G) -> np.ndarray:
         G = np.atleast_2d(G)
@@ -114,21 +142,34 @@ class Analysis:
             return np.full(len(G), v_ref)
         if criterion == "same_mass_flow":
             return v_ref * self.area(g_ref)[0] / self.area(G)
-        d = self.dp_law.coef           # fan = A exp(d0 + f.g) v^(1 + e)
-        base = self.area(G) * np.exp(d[0] + G @ d[2:])
-        return (self.fan_ref_w / base) ** (1 / (1 + d[1]))
+        # same fan power: solve v A(g) dP(v, g) = fan_ref on the study's velocity range
+        lo, hi = self.cfg.study.parameters[self.velocity]
+        vg = np.linspace(lo, hi, 241)
+        Gr = np.repeat(G, len(vg), axis=0)
+        fan = (np.tile(vg, len(G)) * self.area(Gr) * self.dp(np.tile(vg, len(G)), Gr)).reshape(len(G), len(vg))
+        out = np.full(len(G), np.nan)                     # NaN: needs a velocity outside the study
+        for i, f in enumerate(fan):
+            if f[0] <= self.fan_ref_w <= f[-1] and np.all(np.diff(f) > 0):
+                out[i] = np.interp(self.fan_ref_w, f, vg)
+        return out
 
     def evaluate(self, criterion: str, G) -> pd.DataFrame:
         G = np.atleast_2d(G)
         v = self.velocity_for(criterion, G)
-        rth = self.r_law(v, G)
-        dp = self.dp_law(v, G)
+        ok = np.isfinite(v)
+        m, s = np.full(len(G), np.nan), np.full(len(G), np.nan)
+        dp = np.full(len(G), np.nan)
+        if ok.any():
+            m[ok], s[ok] = self.log_rth(v[ok], G[ok])
+            dp[ok] = self.dp(v[ok], G[ok])
         lo, hi = self.cfg.study.parameters[self.velocity]
+        rth = np.exp(m)
         out = pd.DataFrame(G, columns=self.geo)
         out["velocity"] = v
-        out["velocity_in_study_range"] = (v >= lo - 1e-9) & (v <= hi + 1e-9)
+        out["velocity_in_study_range"] = ok & (v >= lo - 1e-9) & (v <= hi + 1e-9)
         out["R_th_K_per_W"] = rth
         out["T_max_C"] = self.cfg.geometry_report.inlet_temperature_c + rth * self.q_cell_w
+        out["T_max_std_K"] = rth * self.q_cell_w * s       # delta method on log R_th
         out["dP_Pa"] = dp
         out["mass_flow_g_s"] = self.cfg.geometry_report.air_density * v * self.area(G) * 1000
         out["fan_power_W"] = v * self.area(G) * dp
@@ -164,7 +205,10 @@ def analyse(cfg: Config) -> Analysis:
     Aa = np.column_stack([np.ones(len(G)), G])
     area_coef, *_ = np.linalg.lstsq(Aa, area, rcond=None)
     area_resid = float(np.max(np.abs(Aa @ area_coef - area)))
-    r_gp = gp_loo_r2(np.column_stack([np.log(v), G]), np.log(df["R_th"].to_numpy(float)))
+    X = np.column_stack([np.log(v), G])
+    y_r, y_p = np.log(df["R_th"].to_numpy(float)), np.log(df[gr.pressure].to_numpy(float))
+    r_gp_loo, dp_gp_loo = gp_loo_r2(X, y_r), gp_loo_r2(X, y_p)
+    r_gp, dp_gp = _fit_gp(X, y_r), _fit_gp(X, y_p)
 
     ref = {p: float(np.mean(cfg.study.parameters[p])) for p in [*geo, gr.velocity]}
     ref.update({k: float(x) for k, x in gr.reference.items()})
@@ -173,9 +217,9 @@ def analyse(cfg: Config) -> Analysis:
         raise ValueError("[operating] heat_source must be set: the report needs the heat per cell")
     g_ref = np.array([[ref[g] for g in geo]])
     v_ref = ref[gr.velocity]
-    a = Analysis(cfg, df, geo, gr.velocity, r_law, dp_law, area_coef, area_resid, r_gp, ref, q,
-                 fan_ref_w=0.0, m_ref=0.0)
-    a.fan_ref_w = float(v_ref * a.area(g_ref)[0] * dp_law(np.array([v_ref]), g_ref)[0])
+    a = Analysis(cfg, df, geo, gr.velocity, r_law, dp_law, area_coef, area_resid, r_gp_loo, dp_gp_loo,
+                 r_gp, dp_gp, ref, q)
+    a.fan_ref_w = float(v_ref * a.area(g_ref)[0] * a.dp(np.array([v_ref]), g_ref)[0])
     a.m_ref = float(gr.air_density * v_ref * a.area(g_ref)[0])
     return a
 
@@ -237,14 +281,14 @@ def plot_maps(a: Analysis, path: Path) -> None:
     G = np.column_stack([X.ravel(), Y.ravel()])
     evals = {c: a.evaluate(c, G) for c in CRITERIA}
     T = {c: e["T_max_C"].to_numpy().reshape(X.shape) for c, e in evals.items()}
-    lo = min(t.min() for t in T.values())
-    hi = max(t.max() for t in T.values())
+    lo = min(np.nanmin(t) for t in T.values())
+    hi = max(np.nanmax(t) for t in T.values())
     fig, axes = plt.subplots(1, 4, figsize=(25, 6.4), facecolor="white")
     for ax, (crit, label) in zip(axes[:3], CRITERIA.items()):
         contour(fig, ax, X, Y, T[crit], "Cell T max [C]", f"T max at {a.cfg.geometry_report.c_rate:g}C, {label}",
                 lo, hi, xlabel=_label(a.cfg, gx), ylabel=_label(a.cfg, gy))
         ax.scatter(a.df[gx], a.df[gy], s=12, c="black", label="CFD points")
-        i = int(np.argmin(T[crit]))
+        i = int(np.nanargmin(T[crit]))
         ax.plot(X.ravel()[i], Y.ravel()[i], marker="*", ms=18, color="white", markeredgecolor="black",
                 label="lowest T max")
         ax.legend(frameon=True, fontsize=7, loc="upper right")
@@ -307,22 +351,38 @@ def recommend(cfg: Config, a: Analysis, effects: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for g in a.geo:
         lo, hi = cfg.study.parameters[g]
+        rule = {"min": lo, "max": hi, "reference": a.ref[g]}[gr.indifferent_choice]
+        rule_txt = {"min": "menor valor: módulo mais compacto", "max": "maior valor",
+                    "reference": "valor de referência"}[gr.indifferent_choice]
         x = np.linspace(lo, hi, 81)
         G = np.tile([a.ref[k] for k in a.geo], (len(x), 1))
         G[:, a.geo.index(g)] = x
-        T = a.evaluate("same_fan_power", G)["T_max_C"].to_numpy()
-        spread = float(T.max() - T.min())
-        rule = {"min": lo, "max": hi, "reference": a.ref[g]}[gr.indifferent_choice]
-        rule_txt = {"min": "menor valor da faixa: módulo mais compacto", "max": "maior valor da faixa",
-                    "reference": "valor de referência"}[gr.indifferent_choice]
-        if not bool(sig[g]):
-            value, why = rule, f"efeito na refrigeração não significativo (±2σ) → {rule_txt}"
-        elif spread < gr.tie_tolerance_k:
-            value, why = rule, (f"na mesma potência de ventilador muda o T max em só {spread:.1f} K "
-                                f"(< {gr.tie_tolerance_k:g} K): empate → {rule_txt}")
+        e = a.evaluate("same_fan_power", G)
+        T, S = e["T_max_C"].to_numpy(), e["T_max_std_K"].to_numpy()
+        valid = np.isfinite(T)
+        if not bool(sig[g]) or not valid.any():
+            rows.append({"parameter": g, "value": rule, "spread_same_fan_power_K": np.nan,
+                         "reason": f"efeito na refrigeração não significativo (±2σ) → {rule_txt}"})
+            continue
+        i_best = int(np.nanargmin(T))
+        # tied with the best: closer than the tolerance or than 2 sigma of the difference
+        margin = np.maximum(gr.tie_tolerance_k, 2 * np.sqrt(S ** 2 + S[i_best] ** 2))
+        tied = valid & (T - T[i_best] <= margin)
+        xt = x[tied]
+        value = {"min": xt.min(), "max": xt.max(),
+                 "reference": xt[np.argmin(np.abs(xt - a.ref[g]))]}[gr.indifferent_choice]
+        spread = float(np.nanmax(T) - np.nanmin(T))
+        j = int(np.argmin(np.abs(x - value)))
+        if xt.min() == x[valid].min() and xt.max() == x[valid].max():
+            why = (f"na mesma potência de ventilador todos os valores empatam (diferença máx. {spread:.1f} K, "
+                   f"dentro da incerteza) → {rule_txt}")
         else:
-            value, why = float(x[np.argmin(T)]), f"menor T max na mesma potência de ventilador ({spread:.1f} K de diferença)"
-        rows.append({"parameter": g, "value": value, "reason": why, "spread_same_fan_power_K": spread})
+            why = (f"na mesma potência de ventilador: menor T max em {x[i_best]:.1f} ({T[i_best]:.1f} °C); "
+                   f"empatam com ele (dentro de {gr.tie_tolerance_k:g} K ou 2σ) os valores de {xt.min():.1f} a "
+                   f"{xt.max():.1f} → {rule_txt} desse intervalo ({T[j]:.1f} ± {2 * S[j]:.1f} °C); "
+                   f"fora dele até {spread:.1f} K mais quente")
+        rows.append({"parameter": g, "value": float(value), "reason": why, "spread_same_fan_power_K": spread,
+                     "tied_from": float(xt.min()), "tied_to": float(xt.max()), "best_at": float(x[i_best])})
     return pd.DataFrame(rows)
 
 
@@ -443,8 +503,10 @@ def _recommendation_text(cfg, a: Analysis, rec: pd.DataFrame, size: dict | None)
 {rec_md}
 
 Regra: a comparação justa entre geometrias é na **mesma potência de ventilador** (o mesmo gasto de
-energia para mover o ar). Um parâmetro sem efeito significativo, ou que muda o T max menos que
-{gr.tie_tolerance_k:g} K nessa comparação, fica no menor valor da faixa, que dá o módulo mais compacto.
+energia para mover o ar). Para cada parâmetro, os valores cujo T max fica a menos de
+{gr.tie_tolerance_k:g} K ou de 2σ (incerteza do modelo) do melhor são considerados empatados, e entre
+eles escolhe-se o menor, que dá o módulo mais compacto; um parâmetro sem efeito significativo
+fica no menor valor da faixa.
 {vol}
 Operação dessa geometria a {gr.c_rate:g}C ({a.q_cell_w:.1f} W por célula):
 
@@ -515,8 +577,9 @@ def _report_text(cfg, a: Analysis, all_rows, sens, table, effects, fan_spread, b
     verdict = (f"Na **mesma potência de ventilador**, {sig_txt} muda o T max em só {fan_spread:.1f} K "
                f"em toda a faixa: **as geometrias empatam**. A escolha depende do ventilador (a pressão "
                f"que ele entrega: veja ΔP na tabela da seção 4) e do tamanho do módulo." if flat else
-               f"Na mesma potência de ventilador, {sig_txt} muda o T max em {fan_spread:.1f} K: "
-               f"a melhor geometria está acima.")
+               f"Na mesma potência de ventilador, {sig_txt} muda o T max em até {fan_spread:.1f} K. O menor "
+               f"T max acima é a estimativa central; a recomendação no topo trata como empatados os "
+               f"valores dentro da incerteza do modelo (2σ) e escolhe entre eles o mais compacto.")
 
     return f"""# Relatório: escolha da geometria, estudo `{cfg.study.name}`
 
@@ -552,8 +615,13 @@ no calor, então R_th depende só da geometria e da velocidade do ar. Leis ajust
 {n_conv} pontos (mínimos quadrados em log):
 
 - {law_r} — validação deixando um ponto de fora: R² = {a.r_law.loo_r2:.3f}
-  (processo gaussiano nas mesmas entradas: R² = {a.r_gp_loo:.3f}; a lei simples basta)
 - {law_dp} — R² = {a.dp_law.loo_r2:.3f}
+
+As leis servem para ler o efeito de cada parâmetro (tabela abaixo). **A comparação das seções
+4 e 5 e a recomendação usam processos gaussianos** nas mesmas entradas (R² deixando um ponto de
+fora: R_th {a.r_gp_loo:.3f}, ΔP {a.dp_gp_loo:.3f}), porque a célula tem uma resistência de condução
+interna em série com a convecção: na mesma potência de ventilador, R_th pode ter um mínimo no
+meio da faixa de uma folga, o que uma lei log-linear (monotônica) não representa.
 - Área de entrada do duto, da vazão medida: {area} (erro máx. {a.area_resid * 1e6:.1f} mm²)
 
 Efeito de cada parâmetro sobre toda a sua faixa, na mesma velocidade:

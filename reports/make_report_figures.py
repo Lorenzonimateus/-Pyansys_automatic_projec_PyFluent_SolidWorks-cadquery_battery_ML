@@ -26,7 +26,7 @@ from autocfd.config import load_config  # noqa: E402
 from autocfd.plot_style import SERIES, contour, plt_agg, style_lines  # noqa: E402
 
 OLD, NEW = "doe_crate", "doe_crate_kfix"
-WORST, BEST = "dp010", "dp030"
+WORST, BEST, EXTRA = "dp021", "dp030", "dp010"   # highest T max, closest to L1 = P1 = 2, first PINN case
 FIG = ROOT / "reports" / "figures"
 
 
@@ -102,7 +102,7 @@ def fig_pinn(name_w: str, name_b: str) -> dict:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(15, 5.6), facecolor="white")
     for (name, label), color in zip(((name_w, f"{WORST} (worst)"), (name_b, f"{BEST} (recommended)")), SERIES):
         d = study(NEW) / "pinn" / name
-        comp = pd.read_csv(next(d.glob("*_pinn_vs_fv.csv")))
+        comp = pd.read_csv(next(f for f in d.glob("*_pinn_vs_fv.csv") if "parametric" not in f.name))
         a1.plot(comp["time_s"], comp["t_max_fv_c"], color=color, lw=2, label=f"{label}, finite volumes")
         a1.plot(comp["time_s"], comp["t_max_pinn_c"], color=color, lw=2, ls="--", label=f"{label}, PINN")
         sweep = pd.read_csv(next(d.glob("*_parametric_sweep.csv")))
@@ -110,7 +110,7 @@ def fig_pinn(name_w: str, name_b: str) -> dict:
         a2.plot(sweep["c_rate"], sweep["t_max_end_pinn_c"], color=color, lw=2, label=f"{label}, parametric PINN")
         a2.plot(pm["c_rate"], pm["t_max_end_fv_c"], "o", ms=8, color=color, markeredgecolor="white",
                 markeredgewidth=2, label=f"{label}, finite volumes")
-        one = pd.read_csv(next(d.glob("*_metrics.csv")))
+        one = pd.read_csv(next(f for f in d.glob("*_metrics.csv") if "parametric" not in f.name))
         out[name] = {"one_load": one.iloc[0].to_dict(), "parametric": pm.to_dict("records")}
     style_lines(a1, "time [s]", "cell T max [C]", "10C discharge (360 s), hottest cell")
     a1.legend(frameon=False, fontsize=8)
@@ -152,7 +152,7 @@ def main() -> None:
                         "t_max_range_C": [float(ok["T_max_C"].min()), float(ok["T_max_C"].max())],
                         "dp_range_Pa": [float(ok["dP_Pa"].min()), float(ok["dP_Pa"].max())]}
     pts = {}
-    for name in (WORST, BEST):
+    for name in (WORST, BEST, EXTRA):
         r = new.set_index("id").loc[int(name[2:])]
         cells = load_cells(study(NEW) / "cells" / f"{name}.npz")
         c = hottest(cells)
@@ -166,6 +166,11 @@ def main() -> None:
     numbers["points"] = pts
     fig_h_maps(load_cells(study(NEW) / "cells" / f"{WORST}.npz"), load_cells(study(NEW) / "cells" / f"{BEST}.npz"))
     numbers["pinn"] = fig_pinn(WORST, BEST)
+    extra = study(NEW) / "pinn" / EXTRA
+    if extra.exists():
+        numbers["pinn"][EXTRA] = {
+            "one_load": pd.read_csv(next(f for f in extra.glob("*_metrics.csv") if "parametric" not in f.name)).iloc[0].to_dict(),
+            "parametric": pd.read_csv(next(extra.glob("*_parametric_metrics.csv"))).to_dict("records")}
     copy_figures()
     rec = study(NEW) / "geometry" / "recommended_geometry.csv"
     if rec.exists():
