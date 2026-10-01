@@ -35,6 +35,11 @@ min_size_mm = 0.3
 max_size_mm = 3.0
 hex_max_size_mm = 2.4
 bl_layers = 5
+# The CAD import of the .scdocx can fail for reasons outside the geometry
+# ("attaching to assembly failed": CAD reader / license); a new session usually
+# works. These two do not change the mesh (nor the case folder key).
+attempts = 3
+retry_wait_s = 120
 
 # Fluent: the base case is read, its mesh replaced, and these named expressions
 # (input parameters of the case) are set. Values in the unit written next to them.
@@ -78,7 +83,7 @@ monitor = ["t_max", "p_in"]
 min_iterations = 200
 max_iterations = 500
 check_every = 50
-sample_every = 10
+sample_every = 25
 rel_tol = 2e-3             # max |change| / |value| of the block averages
 average_window = 200
 save_case_data = true
@@ -139,6 +144,11 @@ name = "doe_crate"
 samples = 40
 seed = 42
 outputs = ["T_max_C", "dT_cells_K", "dP_Pa"]
+# Stop when this many geometries IN A ROW fail with the same error: that is the
+# environment (license, CAD reader, hung process), not the parameters.
+# Failed points: status geometry_failed (SolidWorks/SpaceClaim) or mesh_failed
+# (Fluent Meshing). Recompute them with `study --retry-failed`.
+max_consecutive_failures = 3
 
 [study.parameters]
 "cad.D" = [22.0]

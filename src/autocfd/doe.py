@@ -21,7 +21,7 @@ import numpy as np
 from scipy.stats import qmc
 
 from .config import Config
-from .pipeline import append_csv, ensure_mesh
+from .pipeline import GeometryError, append_csv, ensure_mesh
 
 log = logging.getLogger(__name__)
 
@@ -86,14 +86,24 @@ def run_points(cfg: Config, points: list[dict], results_csv: Path) -> None:
     out = results_csv.parent
     groups = group_by_geometry(cfg, points)
     log.info("%d point(s) in %d distinct geometry(ies)", len(points), len(groups))
+    streak: list[str] = []  # errors of the consecutive failed geometries
     for key, pts in groups.items():
         try:
             mesh = ensure_mesh(pts[0][1])
-        except Exception as e:  # noqa: BLE001 - an invalid geometry does not stop the study
-            log.exception("Geometry %s failed: %s", key, e)
+            streak.clear()
+        except Exception as e:  # noqa: BLE001 - one bad geometry does not stop the study
+            status = "geometry_failed" if isinstance(e, GeometryError) else "mesh_failed"
+            message = (str(e).splitlines() or [repr(e)])[0][:300]
+            log.exception("Geometry %s: %s: %s", key, status, message)
             for d, _ in pts:
-                append_csv(results_csv, {**d, "status": "geometry_failed", "geometry": key,
-                                         "error": str(e).splitlines()[0][:300]})
+                append_csv(results_csv, {**d, "status": status, "geometry": key, "error": message})
+            streak.append(f"{status}: {message}")
+            limit = cfg.study.max_consecutive_failures
+            if limit and len(streak) >= limit and len(set(streak[-limit:])) == 1:
+                raise RuntimeError(
+                    f"{limit} geometries in a row failed with the same error ({streak[-1]}). This points "
+                    "to the environment (license, CAD reader, a hung Ansys process), not to the "
+                    "parameters: check it and run `study --retry-failed`.")
             continue
 
         # Sort by the Fluent inputs: each point starts from a nearby solution
@@ -117,9 +127,31 @@ def run_points(cfg: Config, points: list[dict], results_csv: Path) -> None:
             runner.close()
 
 
-def run_study(cfg: Config, dry_run: bool = False) -> Path:
+def drop_failed(results_csv: Path) -> list[int]:
+    """Remove the failed rows of results.csv (kept in results_failed_<time>.csv) so
+    that those points are computed again. Returns their ids."""
+    import time
+
+    import pandas as pd
+
+    if not results_csv.exists():
+        return []
+    df = pd.read_csv(results_csv)
+    failed = df[df["status"] != "ok"]
+    if failed.empty:
+        return []
+    backup = results_csv.with_name(f"results_failed_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+    failed.to_csv(backup, index=False)
+    df[df["status"] == "ok"].to_csv(results_csv, index=False)
+    log.info("%d failed point(s) removed from %s (saved in %s)", len(failed), results_csv.name, backup.name)
+    return failed["id"].astype(int).tolist()
+
+
+def run_study(cfg: Config, dry_run: bool = False, retry_failed: bool = False) -> Path:
     design = load_or_create_design(cfg)
     results_csv = study_dir(cfg) / "results.csv"
+    if retry_failed and not dry_run:
+        drop_failed(results_csv)
     done = finished_ids(results_csv)
     pending = [d for d in design if d["id"] not in done]
     log.info("%d points in the plan, %d done, %d to compute", len(design), len(done), len(pending))

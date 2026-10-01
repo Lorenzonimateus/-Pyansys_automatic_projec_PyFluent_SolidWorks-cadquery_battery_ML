@@ -12,6 +12,7 @@ import csv
 import json
 import logging
 import shutil
+import time
 from pathlib import Path
 
 from .config import Config
@@ -33,19 +34,54 @@ def ensure_geometry(cfg: Config) -> Path:
     return scdocx
 
 
+class GeometryError(RuntimeError):
+    """SolidWorks or SpaceClaim could not produce the geometry (usually an invalid
+    parameter combination: retrying the same values gives the same result)."""
+
+
+class MeshError(RuntimeError):
+    """Fluent Meshing failed on a valid geometry (often transient: CAD import or
+    license); the point can be retried."""
+
+
+def _first_line(e: BaseException) -> str:
+    return (str(e).splitlines() or [repr(e)])[0]
+
+
 def ensure_mesh(cfg: Config) -> Path:
-    """Return the mesh for this geometry, building it if needed."""
+    """Return the mesh for this geometry, building it if needed.
+
+    Fluent Meshing is tried [mesh] attempts times, waiting retry_wait_s between
+    tries: its CAD import of the .scdocx can fail for reasons outside the
+    geometry ("attaching to assembly failed"), and a new session usually works."""
     from . import meshing
 
     mesh = cfg.case_dir() / "mesh.msh.h5"
     if mesh.exists():
         log.info("Reusing existing mesh: %s", mesh)
         return mesh
-    scdocx = ensure_geometry(cfg)
-    meshing.build_mesh(cfg, scdocx, mesh)
-    for tmp in mesh.parent.glob("FM_*"):  # Fluent Meshing scratch folders
-        shutil.rmtree(tmp, ignore_errors=True)
-    return mesh
+    try:
+        scdocx = ensure_geometry(cfg)
+    except Exception as e:
+        raise GeometryError(_first_line(e)) from e
+
+    attempts = max(1, cfg.mesh.attempts)
+    last: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            meshing.build_mesh(cfg, scdocx, mesh)
+            return mesh
+        except Exception as e:  # noqa: BLE001
+            last = e
+            log.warning("Meshing attempt %d/%d of %s failed: %s", attempt, attempts,
+                        cfg.geometry_key(), _first_line(e))
+            mesh.unlink(missing_ok=True)
+            if attempt < attempts:
+                time.sleep(cfg.mesh.retry_wait_s)
+        finally:
+            for tmp in mesh.parent.glob("FM_*"):  # Fluent Meshing scratch folders
+                shutil.rmtree(tmp, ignore_errors=True)
+    raise MeshError(f"after {attempts} attempts: {_first_line(last)}") from last
 
 
 def append_csv(path: Path, row: dict) -> None:

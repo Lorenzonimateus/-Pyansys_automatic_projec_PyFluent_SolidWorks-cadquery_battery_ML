@@ -51,6 +51,8 @@ def main(argv: list[str] | None = None) -> None:
     p_solve.add_argument("--base", action="store_true", help="solve the base case mesh (no geometry/meshing)")
     p_study = sub.add_parser("study")
     p_study.add_argument("--dry-run", action="store_true", help="only show the plan and the geometry groups")
+    p_study.add_argument("--retry-failed", action="store_true",
+                         help="compute again the points whose status is not ok")
     p_post = sub.add_parser("postprocess")
     p_post.add_argument("--single", action="store_true", help="points of single_runs.csv instead of the study")
     p_img = sub.add_parser("images")
@@ -83,7 +85,7 @@ def main(argv: list[str] | None = None) -> None:
         run_single(cfg, use_base_mesh=args.base)
     elif args.command == "study":
         from .doe import run_study
-        run_study(cfg, dry_run=args.dry_run)
+        run_study(cfg, dry_run=args.dry_run, retry_failed=args.retry_failed)
     elif args.command == "postprocess":
         from .postprocess import postprocess_saved
         print(f"{postprocess_saved(cfg, single=args.single)} point(s) post-processed")

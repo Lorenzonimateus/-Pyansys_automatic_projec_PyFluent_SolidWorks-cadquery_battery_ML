@@ -46,6 +46,8 @@ class Mesh:
     max_size_mm: float = 3.0
     hex_max_size_mm: float = 2.4
     bl_layers: int = 5
+    attempts: int = 3            # Fluent Meshing tries per geometry (CAD import can fail transiently)
+    retry_wait_s: float = 120.0  # wait between tries
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,7 @@ class Study:
     samples: int = 20
     seed: int = 42
     outputs: tuple[str, ...] = ()
+    max_consecutive_failures: int = 3  # stop the study: failures in a row point to the environment
     parameters: dict[str, tuple[float, float]] = field(default_factory=dict)
 
 
@@ -142,7 +145,8 @@ class Config:
 
     def geometry_params(self) -> dict[str, Any]:
         mesh = dataclasses.asdict(self.mesh)
-        mesh.pop("processors")
+        for run_setting in ("processors", "attempts", "retry_wait_s"):  # do not change the mesh
+            mesh.pop(run_setting)
         return {"cad": dict(sorted(self.cad.items())), "mesh": mesh}
 
     def geometry_key(self) -> str:
