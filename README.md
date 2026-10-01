@@ -108,6 +108,24 @@ pip install -e ".[dev]"
 pip install torch --index-url https://download.pytorch.org/whl/cu126   # for `pinn`
 ```
 
+## Input files (not in the repository)
+
+The pipeline starts from four files made by hand, which are **not published** here
+(`inputs/` is in `.gitignore`): the SolidWorks part with the global variables, the
+SpaceClaim document with the named selections, the Fluent Meshing workflow and the
+Fluent base case. `configs/default.toml` (`[paths]`) expects them in `inputs/`:
+
+```
+inputs/geometria_parametrizada.SLDPRT                 SolidWorks part (global variables D, L1, P1)
+inputs/geometria_parametrizada.scdocx                 SpaceClaim document (named selections inlet, output)
+inputs/geometria_parametrizada_9_cells_workflow_files/geometria_parametrizada_9_cells.wft
+inputs/geometria_parametrizada_9_cells.cas.h5         Fluent base case (+ .dat.h5)
+```
+
+`examples/geometria_parametrizada_9_cells.wft` is the meshing workflow used here (watertight,
+poly-hexcore, 5 prism layers), as a template. Build your own files with the steps below,
+then check them with `autocfd inspect`.
+
 ## Setting up a new project (the "by hand" part)
 
 1. **SolidWorks.** Put every dimension you want to vary under *Tools > Equations* as a

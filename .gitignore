@@ -19,3 +19,7 @@ fluent*.bat
 cleanup-fluent-*
 FM_*/
 ~$*
+
+# Local input files (SolidWorks part, SpaceClaim document, Fluent Meshing workflow
+# files, Fluent base case): not published; see "Input files" in README.md
+inputs/
