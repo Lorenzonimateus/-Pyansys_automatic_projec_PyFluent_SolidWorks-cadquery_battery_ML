@@ -58,6 +58,10 @@ class PINNSettings:
     # tiny gradient, and without a cap its weight explodes (seen: 5e7 for the adiabatic ends)
     # and the network stops fitting the equation
     max_weight_ratio: float = 1e3
+    # parametric PINN: train on a range wider than the one used (fraction of the half-range on
+    # each side), so that the ends of c_rate_range are inside the trained domain (seen: 5.6 K
+    # error at 10C, the upper end, when training exactly on [1, 10])
+    c_margin: float = 0.1
     seed: int = 0
     device: str = "cuda"
     log_every: int = 500
@@ -324,7 +328,8 @@ class ParametricCellPINN(_CellPINNBase):
 
     def _extra(self, n: int):
         torch = _torch()
-        return (2 * torch.rand(n, 1, device=self.device) - 1)
+        m = self.s.c_margin
+        return (2 + 2 * m) * torch.rand(n, 1, device=self.device) - 1 - m   # c_hat in [-1-m, 1+m]
 
     def coeffs(self, x) -> dict:
         cell = self.cell
