@@ -10,6 +10,7 @@
   pinn       transient temperature of a cell (PINN), cooled with the CFD h map of a point ([pinn])
   images     temperature/pressure/velocity on the mid-planes of saved cases (.cas.h5 + .dat.h5)
   analyze    sensitivity analysis of the study results (no Ansys)
+  geometry-report  which geometry is best: fair comparison of the cad.* parameters + report.md (no Ansys)
   train      train the Machine Learning model on the study results (no Ansys)
   optimize   surrogate-based optimization with CFD verification ([optimize])
   best       show the best CFD points found so far (no Ansys)
@@ -66,6 +67,7 @@ def main(argv: list[str] | None = None) -> None:
     p_img = sub.add_parser("images")
     p_img.add_argument("cases", nargs="+", type=Path, help=".cas.h5 files (with their .dat.h5)")
     sub.add_parser("analyze")
+    sub.add_parser("geometry-report")
     sub.add_parser("train")
     sub.add_parser("optimize")
     sub.add_parser("best")
@@ -112,6 +114,9 @@ def main(argv: list[str] | None = None) -> None:
         for case in args.cases:
             for path in images_from_case(cfg, case):
                 print(path)
+    elif args.command == "geometry-report":
+        from .geometry_report import build_report
+        print(build_report(cfg))
     elif args.command == "analyze":
         from .doe import study_dir
         from .sensitivity import analyze

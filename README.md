@@ -50,6 +50,7 @@ autocfd pinn                           # transient temperature of a cell, one lo
 autocfd pinn --parametric              # one PINN for every C-rate in [pinn] c_rate_range
 autocfd pinn --replot                  # redo the PINN figures from the saved model
 autocfd analyze                        # sensitivity: Sobol indices, CoP, response surfaces
+autocfd geometry-report                # which geometry is best: fair comparison + report.md
 autocfd train                          # ML model, leave-one-out validation
 autocfd optimize                       # Bayesian optimization with CFD verification
 autocfd best                           # best CFD points so far
@@ -281,8 +282,36 @@ output/
     optimization.csv          each optimization iteration: proposal, prediction, CFD result
     results_failed_<time>.csv failed rows removed by `study --retry-failed`
     cells/dpNNN.npz           h maps, geometry, material of the 9 cells (PINN input)
+    geometry/                 geometry report: report.md, figures, tables
     pinn/<point>/             PINN models, comparisons with finite volumes, figures
 ```
+
+## Geometry choice (`geometry-report`)
+
+The C-rate dominates the cell temperature (Sobol S_T 0.81 in doe_crate) and hides the
+geometry. With constant properties the problem is linear in the heat, so the
+**thermal resistance R_th = (T max − T inlet) / Q_cell** depends only on the geometry
+and the air velocity. `autocfd geometry-report` fits, on the converged points,
+
+    log R_th = a0 + b log v + sum c_i g_i        log dP = d0 + e log v + sum f_i g_i
+
+(standard errors, exact leave-one-out; a Gaussian process on the same inputs checks
+the form), fits the inlet area from the measured mass flow (a gap that widens the
+duct gets more air at the same velocity), and compares the `cad.*` parameters in
+three fair ways relative to `[geometry_report] reference`: the same inlet velocity,
+the same mass flow and the same fan power. Parameters whose effect on R_th is
+within ±2σ are reported as indifferent (choose them by module size).
+
+Output in `output/studies/<name>/geometry/`: `report.md` (short report in
+Portuguese, with tables and figures), `geometry_tradeoff.png`, `geometry_maps.png`
+(two geometric parameters: T max at `c_rate` for the three criteria on one colour
+scale, and dP), `geometry_comparison.csv`, `geometry_effects.csv`.
+
+Result for doe_crate (L1 = gap across the flow, P1 = gap along the flow, both 2 to 10 mm):
+P1 has no significant effect (−3.7 % ± 3.9 % on R_th); L1 raises R_th by 67 % and
+lowers dP by 93 % over its range at the same velocity, but **at the same fan power all
+L1 give the same T max (within 0.6 K)**: the choice is set by the fan (pressure it
+delivers) and the module size.
 
 ## Sensitivity, ML and optimization
 

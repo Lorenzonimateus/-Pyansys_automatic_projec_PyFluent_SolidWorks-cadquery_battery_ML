@@ -125,6 +125,21 @@ class PINN:
 
 
 @dataclass(frozen=True)
+class GeometryReport:
+    """Fair comparison of the geometric (cad.*) study parameters (geometry_report.py)."""
+    velocity: str = "fluent.parameter_velocity_inlet"   # study parameter: inlet air velocity
+    temperature: str = "T_max_C"                        # result columns
+    pressure: str = "dP_Pa"
+    heat: str = "Q_cell_W"
+    mass_flow: str = "m_out"
+    inlet_temperature_c: float = 20.0
+    air_density: float = 1.177
+    c_rate: float = 10.0                                # C-rate of the temperature tables
+    reference: dict[str, float] = field(default_factory=dict)   # empty: middle of each range
+    labels: dict[str, str] = field(default_factory=dict)        # axis labels of the parameters
+
+
+@dataclass(frozen=True)
 class Study:
     name: str = "study"
     samples: int = 20
@@ -157,6 +172,7 @@ class Config:
     images: Images = field(default_factory=Images)
     ml_fields: MLFields = field(default_factory=MLFields)
     pinn: PINN = field(default_factory=PINN)
+    geometry_report: GeometryReport = field(default_factory=GeometryReport)
     study: Study = field(default_factory=Study)
     optimize: Optimize = field(default_factory=Optimize)
 
@@ -290,6 +306,7 @@ def load_config(path: str | Path) -> Config:
         images=_build(Images, {**images_raw, "ranges": ranges}),
         ml_fields=_build(MLFields, mlf_raw),
         pinn=_build(PINN, raw.get("pinn", {})),
+        geometry_report=_build(GeometryReport, raw.get("geometry_report", {})),
         study=_build(Study, {**study_raw, "parameters": params}),
         optimize=_build(Optimize, raw.get("optimize", {})),
     )

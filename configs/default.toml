@@ -157,6 +157,24 @@ max_consecutive_failures = 3
 "operating.c_rate" = [1.0, 10.0]
 "fluent.parameter_velocity_inlet" = [1.0, 7.0]
 
+# Which geometry is best (`autocfd geometry-report`): the C-rate dominates T max and
+# hides the geometry, so the report uses the thermal resistance
+# R_th = (T max - T inlet) / Q_cell (independent of the C-rate) and compares the cad.*
+# parameters at the same inlet velocity, the same mass flow and the same fan power.
+# Output: output/studies/<name>/geometry/report.md + figures and tables.
+[geometry_report]
+velocity = "fluent.parameter_velocity_inlet"
+temperature = "T_max_C"
+pressure = "dP_Pa"
+heat = "Q_cell_W"
+mass_flow = "m_out"
+inlet_temperature_c = 20.0
+air_density = 1.177
+c_rate = 10.0                    # C-rate of the temperature tables
+# Reference point of the comparison (missing ones: middle of the study range)
+reference = { "cad.L1" = 6.0, "cad.P1" = 6.0, "fluent.parameter_velocity_inlet" = 3.0 }
+labels = { "cad.L1" = "L1, gap across the flow [mm]", "cad.P1" = "P1, gap along the flow [mm]", "operating.c_rate" = "C-rate", "fluent.parameter_velocity_inlet" = "inlet velocity [m/s]" }
+
 # Surrogate-based optimization: Gaussian process + expected improvement.
 # Each iteration picks the most promising point, runs it in CFD, adds it to
 # results.csv and retrains, so the surrogate improves where it matters.
