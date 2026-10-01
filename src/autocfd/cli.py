@@ -58,7 +58,11 @@ def main(argv: list[str] | None = None) -> None:
     p_post.add_argument("--single", action="store_true", help="points of single_runs.csv instead of the study")
     p_post.add_argument("--only", nargs="+", choices=["images", "ml_fields", "cells"],
                         help="redo only these outputs")
-    sub.add_parser("pinn")
+    p_pinn = sub.add_parser("pinn")
+    p_pinn.add_argument("--parametric", action="store_true",
+                        help="one network for every C-rate in [pinn] c_rate_range")
+    p_pinn.add_argument("--replot", action="store_true",
+                        help="only redo the figures of the saved PINNs (no training)")
     p_img = sub.add_parser("images")
     p_img.add_argument("cases", nargs="+", type=Path, help=".cas.h5 files (with their .dat.h5)")
     sub.add_parser("analyze")
@@ -97,7 +101,12 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "pinn":
         from .doe import study_dir
         from .pinn import run_from_config
-        run_from_config(cfg, study_dir(cfg))
+        if args.replot:
+            from .pinn import replot_cell_pinn, replot_parametric
+            replot_cell_pinn(cfg, study_dir(cfg))
+            replot_parametric(cfg, study_dir(cfg))
+        else:
+            run_from_config(cfg, study_dir(cfg), parametric=args.parametric or None)
     elif args.command == "images":
         from .images import images_from_case
         for case in args.cases:

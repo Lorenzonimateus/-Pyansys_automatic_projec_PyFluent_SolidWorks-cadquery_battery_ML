@@ -59,3 +59,69 @@ def test_material_read_from_case_file():
 def test_pinn_config():
     p = load_config(CONFIG).pinn
     assert p.cell == "hottest" and p.c_rate == 10.0 and p.device == "cuda"
+
+
+def test_parametric_pinn_scales_and_initial_condition():
+    from autocfd.pinn import ParametricCellPINN, PINNSettings
+
+    s = PINNSettings(width=32, depth=3, iterations=40, n_interior=512, n_side=256, n_ends=128,
+                     device="cpu", log_every=20)
+    p = ParametricCellPINN(_cell(), (1.0, 10.0), 5.0, 0.0128, 293.15, settings=s)
+    assert p.t_end(10.0) == pytest.approx(360.0) and p.t_end(1.0) == pytest.approx(3600.0)
+    assert p.c_from_hat(-1.0) == 1.0 and p.c_from_hat(1.0) == 10.0
+    # the numpy and torch temperature scales agree, and match cell_thermal's rule
+    from autocfd.cell_thermal import temperature_scale
+    for c in (1.0, 4.0, 10.0):
+        expected = temperature_scale(_cell(), p.load(c))
+        assert float(p.temperature_scale(c)) == pytest.approx(expected, rel=1e-6)
+        assert float(p.temperature_scale(torch.tensor([c]))) == pytest.approx(expected, rel=1e-5)
+    pts = np.array([[0.0, 0.035, 0.0]])
+    assert np.allclose(p.predict(pts, [0.0], 3.0), 293.15)
+    hist = p.train()
+    assert hist[-1]["loss"] < hist[0]["loss"]
+    t_end = p.predict_t_max_end([1.0, 10.0], pts)
+    assert np.all(np.isfinite(t_end))
+
+
+def test_pinn_figures(tmp_path):
+    from autocfd import pinn_plots
+    from autocfd.cell_thermal import FVSolver
+
+    cell = _cell()
+    load = Load.constant(10.0, 60.0, 5.0, 0.0128)
+    fv = FVSolver(cell, nr=6, nphi=12, ny=6)
+    series = fv.transient(load, 293.15, dt_s=6.0)
+    # stand-in "PINN": the lumped heating, enough to exercise the plots
+    predict = lambda pts, times: np.array([np.full(len(pts), 293.15 + 0.2 * t) for t in times])  # noqa: E731
+    import pandas as pd
+    comp = pd.DataFrame({"time_s": series["time_s"], "t_max_fv_c": series["t_max_k"] - 273.15,
+                         "t_max_pinn_c": series["t_max_k"] - 273.15, "t_mean_fv_c": series["t_mean_k"] - 273.15,
+                         "t_mean_pinn_c": series["t_mean_k"] - 273.15})
+    pinn_plots.comparison(comp, fv, fv.last_field.ravel(), cell, tmp_path / "a.png")
+    pinn_plots.sections_over_time(predict, cell, 60.0, "t", tmp_path / "b.png")
+    pinn_plots.axial_section(predict, fv, cell, 60.0, tmp_path / "c.png")
+    pinn_plots.surface_map(predict, cell, 60.0, tmp_path / "d.png")
+    pinn_plots.training([{"iteration": i, "loss": 1 / i, "pde": 1 / i, "side": 1 / i, "ends": 1 / i,
+                          "w_pde": 1, "w_side": 2, "w_ends": 3} for i in (1, 2, 3)], "t", tmp_path / "e.png")
+    for f in "abcde":
+        assert (tmp_path / f"{f}.png").stat().st_size > 5000
+
+
+def test_save_and_reload_pinns(tmp_path):
+    from autocfd.pinn import (CellPINN, ParametricCellPINN, PINNSettings, load_cell_pinn,
+                              load_parametric_pinn)
+
+    s = PINNSettings(width=16, depth=2, iterations=5, n_interior=64, n_side=32, n_ends=16, device="cpu")
+    load = Load.constant(5.0, 720.0, 5.0, 0.0128)
+    pts = np.array([[0.005, 0.03, -0.002]])
+    one = CellPINN(_cell(), load, 293.15, s)
+    one.train()
+    one.save(tmp_path / "one.pt")
+    assert np.allclose(load_cell_pinn(tmp_path / "one.pt", _cell(), load).predict(pts, [300.0]),
+                       one.predict(pts, [300.0]))
+    par = ParametricCellPINN(_cell(), (1.0, 10.0), 5.0, 0.0128, 293.15, settings=s)
+    par.train()
+    par.save(tmp_path / "par.pt")
+    back = load_parametric_pinn(tmp_path / "par.pt", _cell())
+    assert (back.c_min, back.c_max) == (1.0, 10.0)
+    assert np.allclose(back.predict(pts, [100.0], 4.0), par.predict(pts, [100.0], 4.0))

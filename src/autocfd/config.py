@@ -117,6 +117,11 @@ class PINN:
     width: int = 128
     depth: int = 6
     device: str = "cuda"
+    # parametric in the C-rate: one network for every constant-current discharge in the range
+    parametric: bool = False
+    c_rate_range: tuple[float, float] = (1.0, 10.0)
+    validate_c_rates: tuple[float, ...] = (1.0, 2.5, 5.0, 7.5, 10.0)
+    parametric_iterations: int = 40000
 
 
 @dataclass(frozen=True)

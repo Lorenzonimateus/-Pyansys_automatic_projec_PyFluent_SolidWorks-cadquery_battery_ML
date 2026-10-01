@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parent
 #   "solve"     one point with the config values  "study"  DOE (resumable)
 #   "analyze"   sensitivity (no Ansys)            "train"  ML model (no Ansys)
 #   "optimize"  Bayesian optimization with CFD    "best"   best CFD points (no Ansys)
-#   "postprocess"  redo images + ML fields (.npz) of every saved study point
+#   "postprocess"  redo images, ML fields (.npz) and cell data of every saved study point
+#   "pinn"      transient cell temperature (PINN), [pinn] section; parametric = true
+#               in the config gives one network for every C-rate (no Ansys, uses the GPU)
 #   (solve, study and optimize also save temperature/pressure/velocity images on the
 #    mid-planes xy, yz, xz, and the same fields as .npz on a fixed grid for CNN training)
 #

@@ -5,7 +5,7 @@ in Python: the geometry lives in **SolidWorks**, it is prepared in **SpaceClaim*
 meshed with a **Fluent Meshing** workflow and solved with a **Fluent** base case,
 all set up and tuned by hand once. Python (PyAnsys + COM) then drives the whole
 chain for every design point and feeds the results to sensitivity analysis,
-Machine Learning and optimization.
+Machine Learning, optimization and a transient model of the battery cells (PINN).
 
 ```
             set up ONCE by hand (GUI)                      driven by Python for each point
@@ -22,6 +22,8 @@ Machine Learning and optimization.
                                                     ──► optimization (GP + expected
                                                         improvement, each candidate
                                                         verified in CFD)
+                          images, ml_fields/*.npz  ──► people / CNN training (U-Net)
+                          cells/*.npz (h maps)      ──► transient cell temperature (PINN)
 ```
 
 ## How to run
@@ -39,9 +41,14 @@ autocfd solve --set cad.D=20 --set fluent.parameter_velocity_inlet=5
 autocfd solve --base                   # base case as it is (checks the solver settings)
 autocfd study --dry-run                # LHS plan and geometry groups
 autocfd study                          # run the DOE (resumable)
+autocfd study --retry-failed           # compute again the points that failed
 autocfd images output/single/<case>.cas.h5   # (re)generate the images of saved cases
-autocfd postprocess                    # redo images + ML fields of all saved study points
+autocfd postprocess                    # redo images, ML fields and cell data of the study points
+autocfd postprocess --only cells       # only some outputs (images, ml_fields, cells)
 autocfd postprocess --single           # same for the points of `solve`
+autocfd pinn                           # transient temperature of a cell, one load ([pinn])
+autocfd pinn --parametric              # one PINN for every C-rate in [pinn] c_rate_range
+autocfd pinn --replot                  # redo the PINN figures from the saved model
 autocfd analyze                        # sensitivity: Sobol indices, CoP, response surfaces
 autocfd train                          # ML model, leave-one-out validation
 autocfd optimize                       # Bayesian optimization with CFD verification
@@ -53,12 +60,16 @@ autocfd best                           # best CFD points so far
 - Windows, Python ≥ 3.11
 - SolidWorks (tested with 2025, API rev 33) — only for `geometry`
 - Ansys 2025 R2 (v252): SpaceClaim + Fluent licenses — for `geometry`, `mesh`, `solve`,
-  `study`, `optimize`. `analyze`, `train`, `best` and `inspect` of the case run without Ansys.
+  `study`, `optimize`, `postprocess`. `analyze`, `train`, `best`, `pinn` and `inspect` of
+  the case run without Ansys.
+- PyTorch with CUDA for `pinn` (tested: torch 2.14 + CUDA 12.6 on an RTX 6000 Ada; it
+  also runs on the CPU, much slower).
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
+pip install torch --index-url https://download.pytorch.org/whl/cu126   # for `pinn`
 ```
 
 ## Setting up a new project (the "by hand" part)
@@ -156,34 +167,96 @@ ds["params"]    # (N, P): velocity, heat source... -> vector or constant channel
 ds["targets"]   # (N, 1, 128, 256): T_norm        -> CNN output (U-Net)
 ```
 
-**Transient cell temperature (PINN).** The steady CFD tells how the air cools each
-cell; a discharge at high C-rate lasts minutes, so the steady temperature is never
-reached. The cell-only model takes the cooling from the CFD and solves the
-transient conduction in one cell:
+**Transient cell temperature (PINN).** See the section below.
 
-    rho cp dT/dt = div(K grad T) + q(t)        q(t) = (C(t) Ah)^2 R_DC / V
-    -K grad T . n = h(phi, y) (T - T_inlet)     on the side, adiabatic ends
+**Failures.** Statuses in `results.csv`: `geometry_failed` (SolidWorks or SpaceClaim:
+usually an invalid parameter combination), `mesh_failed` (Fluent Meshing, after
+`[mesh] attempts` tries: the CAD import of the .scdocx can fail for reasons outside
+the geometry, e.g. "attaching to assembly failed"), `solve_failed` (Fluent; the session
+is restarted). The study goes on, but stops after `[study] max_consecutive_failures`
+identical failures in a row (that is the environment, not the parameters).
+`study --retry-failed` computes those points again (the failed rows are kept in
+`results_failed_<time>.csv`). Only `status = ok` and converged points are used by
+the analysis, the ML and the optimizer.
 
-- `cells/<point>.npz` (written after each solved point, or `postprocess --only
-  cells`): per cell, h(phi, y) = q''/(Ts - T_inlet) from the wall heat flux and
-  temperature of the CFD, geometry, steady CFD temperatures, and the material read
-  from the case file (orthotropic K in global axes, exactly as Fluent used it).
-- `autocfd pinn` ([pinn]): (1) checks that the reduced model reproduces the CFD at
-  steady state (`steady_vs_cfd.csv`), (2) trains the PINN (no simulation data:
-  only the residuals of the equation, the Robin condition and the adiabatic ends;
-  hard initial condition; loss terms balanced by gradient norms), (3) solves the
-  same problem with implicit finite volumes and compares (`*_pinn_vs_fv.png/.csv`,
-  `*_metrics.csv`). Constant C-rate or a C(t) profile (CSV `time_s, c_rate`).
-- Assumptions: the air responds quasi-steadily and the h map holds for any C-rate
-  (constant properties: the air side is linear in the heat).
-- On a synthetic cell (10C, 360 s, 20 000 iterations, 12 min on the RTX 6000):
-  mean temperature within 0.4 K of finite volumes, T max within 2.7 K, field RMSE 1.9 K.
+## Transient cell model (PINN)
 
-**Failures.** A point whose geometry fails (SolidWorks rebuild error, meshing error)
-is written to `results.csv` with `status = geometry_failed` and the study goes on; a
-Fluent failure gives `solve_failed` and the session is restarted. Only `status = ok`
-and converged points are used by the analysis, the ML and the optimizer. To retry a
-failed point, delete its row from `results.csv`.
+The steady CFD tells how the air cools each cell; a discharge at high C-rate lasts
+minutes, so the steady temperature is never reached (and overestimates it). The
+cell-only model takes the cooling from the CFD and solves the transient conduction
+in ONE cell:
+
+    rho cp dT/dt = div(K grad T) + q(t)          q(t) = (C(t) Ah)^2 R_DC / V
+    -K grad T . n = h(phi, y) (T - T_inlet)       on the side
+    dT/dy = 0                                     at the ends (they touch the duct walls)
+
+**Data from the CFD** (`cells/<point>.npz`, written after each solved point, or
+`postprocess --only cells`): per cell, h(phi, y) = q''/(Ts - T_inlet) from the wall
+heat flux and temperature of the cell-air interface, geometry (axis, radius, height),
+steady CFD temperatures, and the material read from the case file (orthotropic K in
+global axes, exactly as Fluent used it). Assumptions: the air responds quasi-steadily
+and the h map holds for any C-rate (constant properties: the air side is linear in
+the heat).
+
+**Three solutions of the same model, each checking the other:**
+
+| | what it is | used for |
+|---|---|---|
+| steady finite volumes | `validate_steady`: the reduced model at steady state with the CFD heat | checks the h map: must reproduce the CFD |
+| transient finite volumes | `FVSolver`: implicit, polar grid, full anisotropic tensor | reference for the PINN |
+| PINN | `CellPINN` / `ParametricCellPINN` (PyTorch, GPU) | fast, differentiable, continuous in time, space and C-rate |
+
+The PINN is trained with NO simulation data, only with the residuals of the
+equation, the Robin condition and the adiabatic ends; the initial condition is exact
+by construction (T = T0 + dT tau N), the problem is made dimensionless (Fourier
+numbers per direction), and the loss terms are balanced by gradient norms during
+training.
+
+**One load** (`autocfd pinn`): constant C-rate or a C(t) profile (`profile_csv`,
+columns `time_s, c_rate`). **Parametric** (`autocfd pinn --parametric`): the C-rate
+is an input of the network; every C-rate in `c_rate_range` is a full discharge
+(3600/C s, or `duration_s`), each with its own temperature scale. One training
+answers any C-rate in the range in milliseconds; it is validated against finite
+volumes at `validate_c_rates`.
+
+**Figures** (`output/studies/<name>/pinn/<point>/`, Fluent style for the maps):
+
+| file | content |
+|---|---|
+| `<cell>_pinn_vs_fv.png` | T max and T mean over time, PINN vs finite volumes; mid-height section at the end: PINN, FV, difference |
+| `<cell>_sections_time.png` | PINN mid-height section at 25, 50, 75 and 100 % of the discharge (one colour scale) |
+| `<cell>_axial_section.png` | section through the cell axis (z = 0) at the end: PINN, FV, difference |
+| `<cell>_surface_and_h.png` | unwrapped side surface: PINN temperature at the end, and the CFD h map that cools it |
+| `<cell>_training.png` | loss terms and adaptive weights over the iterations |
+| `<cell>_parametric_curves.png` | T max during the discharge for each validated C-rate (PINN vs FV), and T max at the end vs C-rate (PINN curve, FV points) |
+| `<cell>_parametric_end_sections.png` | mid-height section at the end of the discharge for the lowest, middle and highest C-rate |
+| `<cell>_parametric_training.png` | training of the parametric network |
+
+Tables: `steady_vs_cfd.csv`, `*_pinn_vs_fv.csv`, `*_metrics.csv`,
+`*_parametric_metrics.csv`, `*_parametric_sweep.csv`; models: `*.pt`.
+
+**Results on doe_crate** (point dp010, 1.3 m/s; hottest cell, cell_7; RTX 6000 Ada):
+
+- Steady check (reduced model with the CFD h map vs the CFD itself): T max within
+  -1.85..+0.5 K for a 105-121 K rise (dp010), within 0.25 K at low heat (dp000).
+- One load, 10C for 360 s (20 000 iterations, 10 min): T max at the end 120.9 C vs
+  123.9 C with finite volumes; T mean within 0.6 K over the whole discharge.
+- Parametric, 1C to 10C (40 000 iterations, 20 min), against finite volumes:
+
+  | C-rate | duration | T max end, FV | T max end, PINN | max error T max | max error T mean |
+  |---|---|---|---|---|---|
+  | 1 | 3600 s | 21.6 C | 21.6 C | 0.06 K | 0.03 K |
+  | 2.5 | 1440 s | 30.1 C | 29.6 C | 0.6 K | 0.3 K |
+  | 5 | 720 s | 55.7 C | 54.6 C | 1.1 K | 0.3 K |
+  | 7.5 | 480 s | 88.3 C | 86.9 C | 1.4 K | 0.3 K |
+  | 10 | 360 s | 123.9 C | 122.2 C | 1.7 K | 0.6 K |
+
+  After training, 46 C-rates are swept in 0.12 s (finite volumes: ~38 s per C-rate).
+- With the same cooling, the steady CFD at 10C would give about 180 C: the transient
+  model shows the cell reaches about 124 C at the end of a full 10C discharge.
+- At low C-rates the cell varies by less than 1 K, so with 11 colorbar ticks at one
+  decimal place some tick labels repeat (e.g. 21.3, 21.3): the values are right, the
+  format is the project's rule.
 
 ## Output layout (`output/`, not in git)
 
@@ -206,6 +279,9 @@ output/
     sensitivity.csv, sensitivity_sobol.png, response_surfaces.png
     ml_model.joblib, ml_metrics.csv, ml_parity.png
     optimization.csv          each optimization iteration: proposal, prediction, CFD result
+    results_failed_<time>.csv failed rows removed by `study --retry-failed`
+    cells/dpNNN.npz           h maps, geometry, material of the 9 cells (PINN input)
+    pinn/<point>/             PINN models, comparisons with finite volumes, figures
 ```
 
 ## Sensitivity, ML and optimization
@@ -229,8 +305,16 @@ output/
   along **z** and 0.8 along x and y, but the cells' axis here is **y** (inherited from
   the P50B project, whose cells were along z): the axial conductivity is applied
   across the cells. Fix in Fluent (k = 25 along y) and re-solve; the meshes are reused.
+- **Cell diameter.** With `cad.D = 22` the meshed cells are 21.68 mm: the volume is 2.9 %
+  smaller than pi (D/2)^2 h, so Fluent generates 2.9 % less heat than the nominal C-rate
+  implies (the PINN uses the nominal heat). Check what the dimension D7@Sketch6 measures.
 - **Steady state.** At high C-rates the discharge lasts minutes, so the steady-state
-  temperature is conservative (overestimated); a transient run is the next step there.
+  temperature is conservative (overestimated): use the transient cell model (PINN).
+- **PINN, axial detail.** The PINN captures the temperature level and the front/wake
+  pattern, but smooths the variation along the cell axis that comes from the high h
+  near the duct floor (up to about 10 K near the ends at 10C). Training longer or adding
+  Fourier features in y would sharpen it; the finite-volume solution of the same model
+  is always written next to it.
 
 ## Tests
 
@@ -238,5 +322,7 @@ output/
 pytest
 ```
 
-They cover the configuration, the convergence logic, the workflow/case parsing,
-the ML model and the optimizer, without needing Ansys or SolidWorks.
+They cover the configuration, the convergence logic, the workflow/case parsing, the
+retries, the ML fields, the ML model and the optimizer, the cell model (analytical
+solutions, energy conservation, lumped limit) and the PINNs (small networks on the
+CPU), without needing Ansys or SolidWorks.

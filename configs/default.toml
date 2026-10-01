@@ -183,7 +183,15 @@ c_rate = 10.0                    # constant-current discharge ...
 profile_csv = ""                 # ... or a profile: CSV with columns time_s, c_rate
 duration_s = 0                   # 0 = full discharge: 3600 / c_rate (360 s at 10C)
 initial_temperature_c = 20.0
-iterations = 20000               # ~13 min on the RTX 6000
+iterations = 20000               # ~10 min on the RTX 6000
 width = 128
 depth = 6
 device = "cuda"
+# Parametric in the C-rate (`pinn --parametric` or parametric = true): ONE network for
+# every constant-current discharge in c_rate_range (duration 3600/C, or duration_s if
+# > 0), validated against finite volumes at validate_c_rates. After training, any
+# C-rate in the range is answered in milliseconds.
+parametric = false
+c_rate_range = [1.0, 10.0]
+validate_c_rates = [1.0, 2.5, 5.0, 7.5, 10.0]
+parametric_iterations = 40000    # ~20 min on the RTX 6000
