@@ -60,3 +60,21 @@ def test_report_written_with_figures(tmp_path):
     eff = pd.read_csv(out / "geometry" / "geometry_effects.csv")
     sig = eff.set_index(["output", "parameter"])["significant"]
     assert bool(sig[("R_th", "cad.L1")]) and not bool(sig[("R_th", "cad.P1")])
+
+
+def test_recommendation_uses_smallest_value_when_indifferent(tmp_path):
+    from autocfd.geometry_report import analyse, recommend
+
+    cfg, out = _study(tmp_path)
+    a = analyse(cfg)
+    eff = pd.DataFrame([{"output": "R_th", "parameter": "cad.L1", "significant": True},
+                        {"output": "R_th", "parameter": "cad.P1", "significant": False}])
+    rec = recommend(cfg, a, eff).set_index("parameter")
+    assert rec.loc["cad.P1", "value"] == 2.0                       # no effect -> most compact
+    assert "não significativo" in rec.loc["cad.P1", "reason"]
+    # a tolerance larger than any spread makes L1 a tie as well -> smallest value
+    big = dataclasses.replace(cfg, geometry_report=dataclasses.replace(cfg.geometry_report, tie_tolerance_k=1e6))
+    assert recommend(big, a, eff).set_index("parameter").loc["cad.L1", "value"] == 2.0
+    # "max" rule
+    mx = dataclasses.replace(big, geometry_report=dataclasses.replace(big.geometry_report, indifferent_choice="max"))
+    assert recommend(mx, a, eff).set_index("parameter").loc["cad.P1", "value"] == 10.0

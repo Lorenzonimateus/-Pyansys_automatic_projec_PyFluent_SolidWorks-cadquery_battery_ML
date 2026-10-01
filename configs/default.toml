@@ -171,6 +171,10 @@ mass_flow = "m_out"
 inlet_temperature_c = 20.0
 air_density = 1.177
 c_rate = 10.0                    # C-rate of the temperature tables
+# Parameters with no significant effect, or that change T max less than tie_tolerance_k
+# at the same fan power, take this value: "min" (most compact module), "max", "reference"
+indifferent_choice = "min"
+tie_tolerance_k = 2.0
 # Reference point of the comparison (missing ones: middle of the study range)
 reference = { "cad.L1" = 6.0, "cad.P1" = 6.0, "fluent.parameter_velocity_inlet" = 3.0 }
 labels = { "cad.L1" = "L1, gap across the flow [mm]", "cad.P1" = "P1, gap along the flow [mm]", "operating.c_rate" = "C-rate", "fluent.parameter_velocity_inlet" = "inlet velocity [m/s]" }

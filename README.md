@@ -300,7 +300,11 @@ the form), fits the inlet area from the measured mass flow (a gap that widens th
 duct gets more air at the same velocity), and compares the `cad.*` parameters in
 three fair ways relative to `[geometry_report] reference`: the same inlet velocity,
 the same mass flow and the same fan power. Parameters whose effect on R_th is
-within ±2σ are reported as indifferent (choose them by module size).
+within ±2σ are reported as indifferent. The report opens with an explicit
+**recommendation**: judged at the same fan power, a parameter with no significant
+effect, or whose effect is below `tie_tolerance_k`, takes `indifferent_choice`
+(default `"min"`: the smallest gap, i.e. the most compact module); the size of the
+cell array is measured from `cells/*.npz`.
 
 Output in `output/studies/<name>/geometry/`: `report.md` (short report in
 Portuguese, with tables and figures), `geometry_tradeoff.png`, `geometry_maps.png`
@@ -310,8 +314,9 @@ scale, and dP), `geometry_comparison.csv`, `geometry_effects.csv`.
 Result for doe_crate (L1 = gap across the flow, P1 = gap along the flow, both 2 to 10 mm):
 P1 has no significant effect (−3.7 % ± 3.9 % on R_th); L1 raises R_th by 67 % and
 lowers dP by 93 % over its range at the same velocity, but **at the same fan power all
-L1 give the same T max (within 0.6 K)**: the choice is set by the fan (pressure it
-delivers) and the module size.
+L1 give the same T max (within 0.6 K)**. Recommendation: **L1 = 2 mm, P1 = 2 mm**, the most
+compact array (342 cm³, against 425 cm³ at L1 = P1 = 6 and 517 cm³ at 10 mm), provided
+the fan delivers about 210 Pa at 12 g/s (same fan power as the reference).
 
 ## Sensitivity, ML and optimization
 

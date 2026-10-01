@@ -135,6 +135,11 @@ class GeometryReport:
     inlet_temperature_c: float = 20.0
     air_density: float = 1.177
     c_rate: float = 10.0                                # C-rate of the temperature tables
+    # A parameter with no significant effect, or whose effect at the same fan power is below
+    # tie_tolerance_k, is set by this rule: "min" = smallest value (most compact module),
+    # "max" or "reference".
+    indifferent_choice: str = "min"
+    tie_tolerance_k: float = 2.0
     reference: dict[str, float] = field(default_factory=dict)   # empty: middle of each range
     labels: dict[str, str] = field(default_factory=dict)        # axis labels of the parameters
 
@@ -357,6 +362,8 @@ def validate(cfg: Config) -> None:
                            *ml.normalization.items()]:
         if not lo < hi:
             raise ValueError(f"[ml_fields] {name}: [{lo}, {hi}] is empty")
+    if cfg.geometry_report.indifferent_choice not in ("min", "max", "reference"):
+        raise ValueError("[geometry_report] indifferent_choice must be min, max or reference")
     if cfg.spaceclaim.flow_axis not in ("x", "y", "z"):
         raise ValueError("spaceclaim.flow_axis must be 'x', 'y' or 'z'")
     if cfg.optimize.sense not in ("min", "max"):

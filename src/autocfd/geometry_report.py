@@ -259,6 +259,73 @@ def plot_maps(a: Analysis, path: Path) -> None:
     plt.close(fig)
 
 
+# ------------------------------------------------------------------ recommendation
+def array_size(cfg: Config, a: Analysis) -> dict | None:
+    """Size of the cell array (bounding box of the cells, mm) as a linear function of the
+    geometric parameters, measured from cells/<point>.npz; None when they do not exist."""
+    from .cell_thermal import load_cells
+    from .doe import study_dir
+
+    rows = []
+    for _, r in a.df.iterrows():
+        f = study_dir(cfg) / "cells" / f"dp{int(r['id']):03d}.npz"
+        if not f.exists():
+            continue
+        cells = load_cells(f)
+        c = np.array([cc.center_m for cc in cells]) * 1000
+        rad = cells[0].radius_m * 1000
+        rows.append([*(r[g] for g in a.geo), np.ptp(c[:, 0]) + 2 * rad, np.ptp(c[:, 1]) + 2 * rad,
+                     cells[0].height_m * 1000])
+    if len(rows) < len(a.geo) + 2:
+        return None
+    d = np.array(rows)
+    A = np.column_stack([np.ones(len(d)), d[:, :len(a.geo)]])
+    fit = {}
+    for k, col in (("length_mm", -3), ("width_mm", -2)):
+        coef, *_ = np.linalg.lstsq(A, d[:, col], rcond=None)
+        fit[k] = coef
+    fit["height_mm"] = float(np.mean(d[:, -1]))
+    return fit
+
+
+def array_volume(size: dict, G) -> pd.DataFrame:
+    G = np.atleast_2d(G)
+    A = np.column_stack([np.ones(len(G)), G])
+    out = pd.DataFrame({"length_mm": A @ size["length_mm"], "width_mm": A @ size["width_mm"]})
+    out["height_mm"] = size["height_mm"]
+    out["volume_cm3"] = out.length_mm * out.width_mm * out.height_mm / 1000
+    return out
+
+
+def recommend(cfg: Config, a: Analysis, effects: pd.DataFrame) -> pd.DataFrame:
+    """One value per geometric parameter. Judged at the same fan power (the fair comparison):
+    no significant effect on R_th, or an effect below tie_tolerance_k over the range ->
+    indifferent_choice (by default the smallest value: most compact module); otherwise the
+    value with the lowest T max."""
+    gr = cfg.geometry_report
+    sig = effects[effects.output == "R_th"].set_index("parameter")["significant"]
+    rows = []
+    for g in a.geo:
+        lo, hi = cfg.study.parameters[g]
+        x = np.linspace(lo, hi, 81)
+        G = np.tile([a.ref[k] for k in a.geo], (len(x), 1))
+        G[:, a.geo.index(g)] = x
+        T = a.evaluate("same_fan_power", G)["T_max_C"].to_numpy()
+        spread = float(T.max() - T.min())
+        rule = {"min": lo, "max": hi, "reference": a.ref[g]}[gr.indifferent_choice]
+        rule_txt = {"min": "menor valor da faixa: módulo mais compacto", "max": "maior valor da faixa",
+                    "reference": "valor de referência"}[gr.indifferent_choice]
+        if not bool(sig[g]):
+            value, why = rule, f"efeito na refrigeração não significativo (±2σ) → {rule_txt}"
+        elif spread < gr.tie_tolerance_k:
+            value, why = rule, (f"na mesma potência de ventilador muda o T max em só {spread:.1f} K "
+                                f"(< {gr.tie_tolerance_k:g} K): empate → {rule_txt}")
+        else:
+            value, why = float(x[np.argmin(T)]), f"menor T max na mesma potência de ventilador ({spread:.1f} K de diferença)"
+        rows.append({"parameter": g, "value": value, "reason": why, "spread_same_fan_power_K": spread})
+    return pd.DataFrame(rows)
+
+
 # ------------------------------------------------------------------ report
 def _md_table(df: pd.DataFrame, floatfmt: dict[str, str] | None = None) -> str:
     floatfmt = floatfmt or {}
@@ -330,11 +397,65 @@ def build_report(cfg: Config) -> Path:
     fan_spread = float(fan_eval["T_max_C"].max() - fan_eval["T_max_C"].min())
     best = {crit: a.evaluate(crit, Gg).sort_values("T_max_C").iloc[0] for crit in CRITERIA}
 
+    rec = recommend(cfg, a, effects)
+    rec.to_csv(out / "recommended_geometry.csv", index=False)
+    size = array_size(cfg, a)
     path = out / "report.md"
-    path.write_text(_report_text(cfg, a, all_rows, sens, table, effects, fan_spread, best, v_ref, significant),
-                    encoding="utf-8")
+    text = _report_text(cfg, a, all_rows, sens, table, effects, fan_spread, best, v_ref, significant)
+    head, _, rest = text.partition("## 1. Estudo")
+    path.write_text(head + _recommendation_text(cfg, a, rec, size) + "## 1. Estudo" + rest, encoding="utf-8")
     log.info("Geometry report written to %s", path)
     return path
+
+
+def _recommendation_text(cfg, a: Analysis, rec: pd.DataFrame, size: dict | None) -> str:
+    gr = cfg.geometry_report
+    G = np.array([[float(rec.set_index("parameter").loc[g, "value"]) for g in a.geo]])
+    geo_txt = ", ".join(f"{g.split('.', 1)[1]} = {G[0, i]:g} mm" for i, g in enumerate(a.geo))
+    rec_md = _md_table(pd.DataFrame({"parâmetro": [_label(cfg, g) for g in rec.parameter],
+                                     "valor recomendado": rec["value"], "motivo": rec["reason"]}),
+                       {"valor recomendado": "g"})
+    ops = []
+    for crit, label in (("same_fan_power", "mesma potência de ventilador da referência"),
+                        ("same_velocity", "mesma velocidade da referência"),
+                        ("same_mass_flow", "mesma vazão da referência")):
+        e = a.evaluate(crit, G).iloc[0]
+        ops.append({"se o ventilador mantiver a": label, "v [m/s]": e["velocity"], "vazão [g/s]": e["mass_flow_g_s"],
+                    "ΔP [Pa]": e["dP_Pa"], "pot. vent. [W]": e["fan_power_W"], "T max [°C]": e["T_max_C"]})
+    ops_md = _md_table(pd.DataFrame(ops), {"v [m/s]": ".2f", "vazão [g/s]": ".1f", "ΔP [Pa]": ".0f",
+                                           "pot. vent. [W]": ".2f", "T max [°C]": ".1f"})
+    vol = ""
+    if size is not None:
+        g_ref = np.array([[a.ref[g] for g in a.geo]])
+        g_max = np.array([[cfg.study.parameters[g][1] for g in a.geo]])
+        v = array_volume(size, np.vstack([G, g_ref, g_max]))
+        v.insert(0, "geometria", ["recomendada", "referência", "maior da faixa"])
+        v["volume vs recomendada"] = v["volume_cm3"] / v["volume_cm3"].iloc[0]
+        vol = ("\nTamanho do arranjo das 9 células (caixa que as envolve; medido nas posições das células "
+               "de cada ponto):\n\n" + _md_table(
+                   v.rename(columns={"length_mm": "comprimento [mm]", "width_mm": "largura [mm]",
+                                     "height_mm": "altura [mm]", "volume_cm3": "volume [cm³]"}),
+                   {"comprimento [mm]": ".1f", "largura [mm]": ".1f", "altura [mm]": ".2f", "volume [cm³]": ".0f",
+                    "volume vs recomendada": ".2f"}) + "\n")
+    return f"""## Recomendação
+
+**Geometria recomendada: {geo_txt}.**
+
+{rec_md}
+
+Regra: a comparação justa entre geometrias é na **mesma potência de ventilador** (o mesmo gasto de
+energia para mover o ar). Um parâmetro sem efeito significativo, ou que muda o T max menos que
+{gr.tie_tolerance_k:g} K nessa comparação, fica no menor valor da faixa, que dá o módulo mais compacto.
+{vol}
+Operação dessa geometria a {gr.c_rate:g}C ({a.q_cell_w:.1f} W por célula):
+
+{ops_md}
+
+A refrigeração é a mesma das outras geometrias para a mesma potência de ventilador, mas o
+ventilador precisa vencer uma queda de pressão maior com menos vazão: confira a curva do
+ventilador (pressão estática disponível) na vazão da primeira linha.
+
+"""
 
 
 def _report_text(cfg, a: Analysis, all_rows, sens, table, effects, fan_spread, best, v_ref, significant) -> str:
@@ -451,9 +572,10 @@ vazão {a.m_ref * 1000:.1f} g/s, potência de ventilador {a.fan_ref_w:.2f} W), a
 
 ![Compromisso](geometry_tradeoff.png)
 {maps}
-## 5. Melhor geometria (menor T max) por critério
+## 5. Detalhe: menor T max em cada critério
 
 Otimizado só nos parâmetros com efeito significativo ({sig_txt}); os demais ficam na referência.
+A recomendação (no topo) usa a mesma potência de ventilador, com empates resolvidos pela compacidade.
 
 {best_lines}
 
