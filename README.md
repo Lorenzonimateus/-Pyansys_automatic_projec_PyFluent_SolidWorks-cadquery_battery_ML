@@ -1,5 +1,38 @@
 # autocfd
 
+> **Projeto de aprendizado / learning project.**
+>
+> **PT:** Este é um projeto educacional, feito para aprender a integrar ferramentas: PyCharm +
+> Python + PyAnsys (PyFluent) + SolidWorks (API COM) + SpaceClaim (script) + Fluent Meshing +
+> Fluent, e depois usar os resultados com scikit-learn (processos gaussianos, Sobol) e PyTorch
+> (PINN). O caso físico (refrigeração a ar de 9 células 21700) é **simples e não é uma análise
+> crítica de engenharia**: CFD em regime permanente, sem estudo de independência de malha, sem
+> validação experimental, propriedades das células aproximadas (calor uniforme, R_DC constante).
+> Use como exemplo de automação e de método, **não** para decisões de projeto ou de segurança.
+>
+> **EN:** An educational project to learn how to tie together PyCharm + Python + PyAnsys
+> (PyFluent) + SolidWorks (COM API) + SpaceClaim (scripting) + Fluent Meshing + Fluent, and then
+> feed the results to scikit-learn (Gaussian processes, Sobol indices) and PyTorch (PINN). The
+> physical case (air cooling of 9 cells 21700) is **simple and not a critical engineering
+> analysis**: steady-state CFD, no mesh-independence study, no experimental validation,
+> approximate cell properties. Use it as an example of automation and method, **not** for
+> design or safety decisions.
+
+## Tools used
+
+| what | tool |
+|---|---|
+| IDE / runner | PyCharm (`main.py`), Python 3.12, venv |
+| CAD (parametric geometry) | SolidWorks 2025, driven through its COM API (`pywin32`) |
+| geometry preparation | Ansys SpaceClaim 2025 R2, IronPython batch script |
+| mesh | Ansys Fluent Meshing 2025 R2, saved watertight workflow (`.wft`) replayed by PyFluent |
+| CFD | Ansys Fluent 2025 R2 through PyAnsys (`ansys-fluent-core`) |
+| design of experiments, sensitivity | SciPy (Latin hypercube, Sobol indices), NumPy, pandas |
+| surrogate models, optimization | scikit-learn (Gaussian processes), SciPy (differential evolution) |
+| transient cell model | finite volumes (SciPy sparse) and a PINN in PyTorch (CUDA GPU) |
+| figures | Matplotlib |
+| tests / lint | pytest, ruff |
+
 Parametric CFD pipeline for studies that are too complex to script the geometry
 in Python: the geometry lives in **SolidWorks**, it is prepared in **SpaceClaim**,
 meshed with a **Fluent Meshing** workflow and solved with a **Fluent** base case,

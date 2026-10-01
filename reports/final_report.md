@@ -1,5 +1,12 @@
 # Relatório final: refrigeração a ar de um módulo de 9 células 21700
 
+> **Projeto de aprendizado.** Este relatório é educacional: o objetivo foi aprender a integrar
+> PyCharm + Python + PyAnsys + SolidWorks + SpaceClaim + Fluent Meshing + Fluent e, depois,
+> análise de sensibilidade, machine learning e PINN. O caso é simples e **não é uma análise
+> crítica de engenharia** (regime permanente, sem estudo de independência de malha, sem
+> validação experimental, propriedades das células aproximadas). Os números servem para
+> ilustrar o método, não para decisões de projeto ou de segurança.
+
 Projeto `autocfd` (SolidWorks → SpaceClaim → Fluent Meshing → Fluent → ML / PINN).
 Estudo final: `doe_crate_kfix` (40 pontos, outubro de 2026). Figuras em `reports/figures/`,
 números em `reports/figures/numbers.json` (gerados por `python reports/make_report_figures.py`).
