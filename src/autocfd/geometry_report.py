@@ -259,7 +259,7 @@ def plot_tradeoff(a: Analysis, path: Path) -> None:
         colour_by = next((k for k in a.geo if k != g), a.velocity)
         sc = ax2.scatter(a.df[g], r, c=a.df[colour_by], cmap="jet", s=40, edgecolors="white", linewidths=1)
         e = a.evaluate("same_velocity", G)
-        ax2.plot(x, e["R_th_K_per_W"], color=SERIES[0], lw=2, label=f"fitted law at {v_ref:g} m/s")
+        ax2.plot(x, e["R_th_K_per_W"], color=SERIES[0], lw=2, label=f"Gaussian process at {v_ref:g} m/s")
         cb = fig.colorbar(sc, ax=ax2, location="left", pad=0.2)
         cb.ax.set_title(colour_by.split(".", 1)[1], fontsize=8, loc="left")
         style_lines(ax2, _label(a.cfg, g), f"R_th brought to {v_ref:g} m/s [K/W]",

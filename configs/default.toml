@@ -203,7 +203,7 @@ seed = 0
 # volumes: curves, mid-height sections, metrics).
 [pinn]
 export_cells = true
-point = "dp010"                  # dp010: v = 1.3 m/s, the hottest point of doe_crate
+point = "dp021"                  # dp021: v = 1.1 m/s, the highest T max of doe_crate_kfix
 cell = "hottest"                 # "cell_5", "hottest" (max CFD temperature) or "all"
 c_rate = 10.0                    # constant-current discharge ...
 profile_csv = ""                 # ... or a profile: CSV with columns time_s, c_rate

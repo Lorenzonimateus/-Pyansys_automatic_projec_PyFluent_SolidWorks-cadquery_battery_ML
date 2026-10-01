@@ -7,6 +7,8 @@ all set up and tuned by hand once. Python (PyAnsys + COM) then drives the whole
 chain for every design point and feeds the results to sensitivity analysis,
 Machine Learning, optimization and a transient model of the battery cells (PINN).
 
+**Results and conclusions: [`reports/final_report.md`](reports/final_report.md)** (in Portuguese).
+
 ```
             set up ONCE by hand (GUI)                      driven by Python for each point
  ┌───────────────────────────────────────────┐   ┌─────────────────────────────────────────────┐
@@ -236,25 +238,20 @@ volumes at `validate_c_rates`.
 Tables: `steady_vs_cfd.csv`, `*_pinn_vs_fv.csv`, `*_metrics.csv`,
 `*_parametric_metrics.csv`, `*_parametric_sweep.csv`; models: `*.pt`.
 
-**Results on doe_crate** (point dp010, 1.3 m/s; hottest cell, cell_7; RTX 6000 Ada):
+**Results on doe_crate_kfix** (RTX 6000 Ada; full report: `reports/final_report.md`):
 
-- Steady check (reduced model with the CFD h map vs the CFD itself): T max within
-  -1.85..+0.5 K for a 105-121 K rise (dp010), within 0.25 K at low heat (dp000).
-- One load, 10C for 360 s (20 000 iterations, 10 min): T max at the end 120.9 C vs
-  123.9 C with finite volumes; T mean within 0.6 K over the whole discharge.
-- Parametric, 1C to 10C (40 000 iterations, 20 min), against finite volumes:
-
-  | C-rate | duration | T max end, FV | T max end, PINN | max error T max | max error T mean |
-  |---|---|---|---|---|---|
-  | 1 | 3600 s | 21.6 C | 21.6 C | 0.06 K | 0.03 K |
-  | 2.5 | 1440 s | 30.1 C | 29.6 C | 0.6 K | 0.3 K |
-  | 5 | 720 s | 55.7 C | 54.6 C | 1.1 K | 0.3 K |
-  | 7.5 | 480 s | 88.3 C | 86.9 C | 1.4 K | 0.3 K |
-  | 10 | 360 s | 123.9 C | 122.2 C | 1.7 K | 0.6 K |
-
-  After training, 46 C-rates are swept in 0.12 s (finite volumes: ~38 s per C-rate).
-- With the same cooling, the steady CFD at 10C would give about 180 C: the transient
-  model shows the cell reaches about 124 C at the end of a full 10C discharge.
+- Steady check (reduced model with the CFD h map vs the CFD itself), 9 cells: T max
+  within −1.4..+1.0 K at up to 214 C (dp021), ±0.25 K (dp030).
+- One load, 10C for 360 s (20 000 iterations, ~10 min): T max at the end within 0.6-0.7 K
+  of finite volumes (dp021: 138.5 vs 139.1 C; dp030: 116.6 vs 117.2 C).
+- Parametric, 1C to 10C (40 000 iterations, ~25 min), max error of T max against finite
+  volumes at 1, 2.5, 5, 7.5, 10C: ≤ 0.71 K (dp021), ≤ 0.55 K (dp030). After training, 46
+  C-rates are swept in 0.12 s (finite volumes: ~40 s per C-rate).
+- Lessons: the adaptive loss weights must be capped (`max_weight_ratio`; without it one
+  run ended 43 K off), and the parametric network is trained on a C-rate range 10 %
+  wider than the one used (`c_margin`; at the edge of an exact range: 5.6 K error).
+- At 10C the steady state would give ~250 C at the worst point; a full 360 s discharge
+  reaches 139 C (117 C at the recommended geometry).
 - At low C-rates the cell varies by less than 1 K, so with 11 colorbar ticks at one
   decimal place some tick labels repeat (e.g. 21.3, 21.3): the values are right, the
   format is the project's rule.
@@ -288,35 +285,38 @@ output/
 
 ## Geometry choice (`geometry-report`)
 
-The C-rate dominates the cell temperature (Sobol S_T 0.81 in doe_crate) and hides the
+The C-rate dominates the cell temperature (Sobol S_T 0.89 in doe_crate_kfix) and hides the
 geometry. With constant properties the problem is linear in the heat, so the
 **thermal resistance R_th = (T max − T inlet) / Q_cell** depends only on the geometry
 and the air velocity. `autocfd geometry-report` fits, on the converged points,
 
     log R_th = a0 + b log v + sum c_i g_i        log dP = d0 + e log v + sum f_i g_i
 
-(standard errors, exact leave-one-out; a Gaussian process on the same inputs checks
-the form), fits the inlet area from the measured mass flow (a gap that widens the
-duct gets more air at the same velocity), and compares the `cad.*` parameters in
-three fair ways relative to `[geometry_report] reference`: the same inlet velocity,
-the same mass flow and the same fan power. Parameters whose effect on R_th is
-within ±2σ are reported as indifferent. The report opens with an explicit
-**recommendation**: judged at the same fan power, a parameter with no significant
-effect, or whose effect is below `tie_tolerance_k`, takes `indifferent_choice`
-(default `"min"`: the smallest gap, i.e. the most compact module); the size of the
-cell array is measured from `cells/*.npz`.
+(standard errors, exact leave-one-out) to read the effect of each parameter and
+whether it is significant. The comparison itself uses **Gaussian processes** on the
+same inputs (log v, `cad.*`): the cell's internal conduction resistance is in series
+with the convection, so at the same fan power R_th can have a minimum inside a gap's
+range, which a log-linear law cannot represent. The inlet area is fitted from the
+measured mass flow (a gap that widens the duct gets more air at the same velocity),
+and the `cad.*` parameters are compared in three ways relative to
+`[geometry_report] reference`: the same inlet velocity, the same mass flow and the
+same fan power (solved on the study's velocity range). The report opens with an
+explicit **recommendation**: at the same fan power, values within `tie_tolerance_k`
+or 2σ (model uncertainty) of the best are tied, and `indifferent_choice` picks among
+them (default `"min"`: the smallest gap, the most compact module); parameters with no
+significant effect take it directly. The size of the cell array is measured from
+`cells/*.npz`.
 
 Output in `output/studies/<name>/geometry/`: `report.md` (short report in
 Portuguese, with tables and figures), `geometry_tradeoff.png`, `geometry_maps.png`
 (two geometric parameters: T max at `c_rate` for the three criteria on one colour
 scale, and dP), `geometry_comparison.csv`, `geometry_effects.csv`.
 
-Result for doe_crate (L1 = gap across the flow, P1 = gap along the flow, both 2 to 10 mm):
-P1 has no significant effect (−3.7 % ± 3.9 % on R_th); L1 raises R_th by 67 % and
-lowers dP by 93 % over its range at the same velocity, but **at the same fan power all
-L1 give the same T max (within 0.6 K)**. Recommendation: **L1 = 2 mm, P1 = 2 mm**, the most
-compact array (342 cm³, against 425 cm³ at L1 = P1 = 6 and 517 cm³ at 10 mm), provided
-the fan delivers about 210 Pa at 12 g/s (same fan power as the reference).
+Result for doe_crate_kfix (L1 = gap across the flow, P1 = gap along the flow, both 2 to
+10 mm): P1 has no significant effect (+0.5 % ± 4.2 % on R_th). At the same fan power L1
+has an optimum near 6 mm (149.9 C at 10C); 3.4 to 10 mm tie within the uncertainty and
+L1 = 2 mm is 11 K warmer. Recommendation: **L1 = 3.4 mm, P1 = 2 mm** (cell array 356 cm³,
+against 425 cm³ at L1 = P1 = 6), provided the fan delivers ~150 Pa at 13 g/s.
 
 ## Sensitivity, ML and optimization
 
@@ -335,20 +335,19 @@ the fan delivers about 210 Pa at 12 g/s (same fan power as the reference).
   extrusions have a fixed 70.15 mm): link it in SolidWorks before using `cad.H`.
 - With the current layout, the mid-plane `yz` (x_mid) falls in the gap between the
   2nd and 3rd columns of cells: it shows the air between them, not a cell section.
-- **Cell conductivity axis.** The material `cell_p50b` of the base case has k = 25 W/m·K
-  along **z** and 0.8 along x and y, but the cells' axis here is **y** (inherited from
-  the P50B project, whose cells were along z): the axial conductivity is applied
-  across the cells. Fix in Fluent (k = 25 along y) and re-solve; the meshes are reused.
-- **Cell diameter.** With `cad.D = 22` the meshed cells are 21.68 mm: the volume is 2.9 %
-  smaller than pi (D/2)^2 h, so Fluent generates 2.9 % less heat than the nominal C-rate
-  implies (the PINN uses the nominal heat). Check what the dimension D7@Sketch6 measures.
+- **Mesh vs CAD diameter.** The faceted CAD import makes the meshed cells ~0.32 mm smaller
+  than the CAD (D = 22 → 21.68 mm; the SolidWorks cylinders are exactly D). The heat is
+  corrected (`[operating] diameter_offset_mm`), but the real gaps are ~0.3 mm larger than
+  L1 and P1; tightening the faceting in the `.wft` and remeshing would remove it.
+- **Fixed in doe_crate_kfix** (doe_crate is kept for comparison): the cell material had
+  the axial k = 25 W/m·K along z instead of y (the cells' axis), and the cells got 2.9 %
+  less heat than the nominal C-rate. Together they lowered the temperature rise by
+  11-64 % (median 33 %).
 - **Steady state.** At high C-rates the discharge lasts minutes, so the steady-state
   temperature is conservative (overestimated): use the transient cell model (PINN).
-- **PINN, axial detail.** The PINN captures the temperature level and the front/wake
-  pattern, but smooths the variation along the cell axis that comes from the high h
-  near the duct floor (up to about 10 K near the ends at 10C). Training longer or adding
-  Fourier features in y would sharpen it; the finite-volume solution of the same model
-  is always written next to it.
+- **PINN, parametric curve.** Between validated C-rates the parametric curve can show a
+  small wiggle (dp021, near 7C); `autocfd pinn` always writes the finite-volume solution
+  of the same model next to it for checking.
 
 ## Tests
 
