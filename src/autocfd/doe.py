@@ -103,7 +103,7 @@ def run_points(cfg: Config, points: list[dict], results_csv: Path) -> None:
                 raise RuntimeError(
                     f"{limit} geometries in a row failed with the same error ({streak[-1]}). This points "
                     "to the environment (license, CAD reader, a hung Ansys process), not to the "
-                    "parameters: check it and run `study --retry-failed`.")
+                    "parameters: check it and run `study --retry-failed`.") from e
             continue
 
         # Sort by the Fluent inputs: each point starts from a nearby solution

@@ -409,7 +409,7 @@ def run_cell_pinn(cell: CellModel, load: Load, t0_k: float, out_dir: Path,
                "final_loss": pinn.history[-1]["loss"]}
     pd.DataFrame([metrics]).to_csv(out_dir / f"{cell.name}_metrics.csv", index=False)
 
-    predict = lambda pts, times: pinn.predict(pts, times)  # noqa: E731
+    predict = pinn.predict
     pinn_plots.comparison(comp, fv, T_pinn[-1], cell, out_dir / f"{cell.name}_pinn_vs_fv.png")
     pinn_plots.sections_over_time(predict, cell, load.duration_s, f"{cell.name}, {_load_label(load)}",
                                   out_dir / f"{cell.name}_sections_time.png")
@@ -474,7 +474,7 @@ def run_parametric(cell: CellModel, c_range: tuple[float, float], capacity_ah: f
     title = f"{cell.name}, C-rate {pinn.c_min:g} to {pinn.c_max:g}"
     pinn_plots.parametric_curves(comps, sweep_c, sweep, summary, cell, title,
                                  out_dir / f"{cell.name}_parametric_curves.png")
-    pinn_plots.parametric_end_sections(lambda pts, times, c: pinn.predict(pts, times, c), pinn, cell,
+    pinn_plots.parametric_end_sections(pinn.predict, pinn, cell,
                                        [pinn.c_min, 0.5 * (pinn.c_min + pinn.c_max), pinn.c_max],
                                        out_dir / f"{cell.name}_parametric_end_sections.png")
     pinn_plots.training(pinn.history, f"{title}, parametric", out_dir / f"{cell.name}_parametric_training.png")
@@ -563,7 +563,7 @@ def replot_cell_pinn(cfg, study_root: Path) -> None:
         T_pinn = pinn.predict(fv.points_xyz().reshape(-1, 3), series["time_s"])
         comp, _ = _compare(fv, series, T_pinn, load, pinn.t0_k)
         hist = pd.read_csv(out_dir / f"{cell.name}_history.csv").to_dict("records")
-        predict = lambda pts, times: pinn.predict(pts, times)  # noqa: E731
+        predict = pinn.predict  # bound to this iteration's network
         pinn_plots.comparison(comp, fv, T_pinn[-1], cell, out_dir / f"{cell.name}_pinn_vs_fv.png")
         pinn_plots.sections_over_time(predict, cell, load.duration_s, f"{cell.name}, {_load_label(load)}",
                                       out_dir / f"{cell.name}_sections_time.png")
@@ -598,7 +598,7 @@ def replot_parametric(cfg, study_root: Path) -> None:
         cell = cells[pt.name.replace("_parametric_pinn.pt", "")]
         pinn = load_parametric_pinn(pt, cell)
         title = f"{cell.name}, C-rate {pinn.c_min:g} to {pinn.c_max:g}"
-        pinn_plots.parametric_end_sections(lambda pts, times, c: pinn.predict(pts, times, c), pinn, cell,
+        pinn_plots.parametric_end_sections(pinn.predict, pinn, cell,
                                            [pinn.c_min, 0.5 * (pinn.c_min + pinn.c_max), pinn.c_max],
                                            out_dir / f"{cell.name}_parametric_end_sections.png")
         hist = pd.read_csv(out_dir / f"{cell.name}_parametric_history.csv").to_dict("records")

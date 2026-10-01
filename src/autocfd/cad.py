@@ -53,7 +53,7 @@ def solidworks():
         yield app
     finally:
         if started:
-            app.ExitApp
+            app.ExitApp  # noqa: B018  late-bound COM: attribute access performs the call
         pythoncom.CoUninitialize()
 
 
@@ -124,7 +124,7 @@ def build(cfg: Config, case_dir: Path) -> Path:
             eqm = doc.GetEquationMgr
             for name, value in cfg.cad.items():
                 _set_equation(eqm, gv[name][0], f'"{name}"= {value!r}')
-            eqm.EvaluateAll  # no-argument methods are attributes in late-bound COM
+            eqm.EvaluateAll  # noqa: B018  no-argument methods are attributes in late-bound COM
             if not doc.ForceRebuild3(False):
                 raise RuntimeError(f"SolidWorks rebuild failed for {cfg.cad}")
 

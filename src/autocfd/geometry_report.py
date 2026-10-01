@@ -249,7 +249,7 @@ def plot_maps(a: Analysis, path: Path) -> None:
                 label="lowest T max")
         ax.legend(frameon=True, fontsize=7, loc="upper right")
     dp = evals["same_velocity"]["dP_Pa"].to_numpy().reshape(X.shape)
-    contour(fig, axes[3], X, Y, dp, "Pressure drop [Pa]", f"Pressure drop, same inlet velocity",
+    contour(fig, axes[3], X, Y, dp, "Pressure drop [Pa]", "Pressure drop, same inlet velocity",
             xlabel=_label(a.cfg, gx), ylabel=_label(a.cfg, gy))
     axes[3].scatter(a.df[gx], a.df[gy], s=12, c="black")
     for ax in axes:
@@ -347,7 +347,6 @@ def build_report(cfg: Config) -> Path:
     from .doe import study_dir
     from .sensitivity import analyze
 
-    gr = cfg.geometry_report
     sd = study_dir(cfg)
     out = sd / "geometry"
     out.mkdir(parents=True, exist_ok=True)
@@ -571,6 +570,16 @@ vazão {a.m_ref * 1000:.1f} g/s, potência de ventilador {a.fan_ref_w:.2f} W), a
 {tab_md}
 
 ![Compromisso](geometry_tradeoff.png)
+
+**Como ler as curvas.** Cada curva responde: "trocando a geometria de referência por outra,
+mantendo X igual ao da referência, o que acontece?". Na referência ({ref_txt}) as três condições
+são idênticas (mesma velocidade, mesma vazão e mesma potência ao mesmo tempo), por isso **as três
+curvas se cruzam no valor de referência por construção**: o cruzamento não é um ótimo nem um
+compromisso; com outra referência elas se cruzariam em outro ponto. O que importa é a forma de
+cada curva: na mesma velocidade ou vazão a geometria muda muito a temperatura, mas à custa de
+gastar mais (ou menos) energia no ventilador; **na mesma potência de ventilador** (a comparação
+justa) a curva plana indica que as geometrias resfriam igual e diferem só na combinação
+vazão × pressão que o ventilador precisa entregar e no tamanho do módulo.
 {maps}
 ## 5. Detalhe: menor T max em cada critério
 

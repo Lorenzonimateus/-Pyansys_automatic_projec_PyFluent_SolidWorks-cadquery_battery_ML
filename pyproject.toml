@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 # PINN of the cells (autocfd pinn); for CUDA install torch from https://pytorch.org
 pinn = ["torch>=2.4"]
 
@@ -37,3 +37,12 @@ autocfd = ["scripts/*.py"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["src/autocfd/scripts"]   # IronPython run inside SpaceClaim (its API names are globals there)
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# B905 zip(strict=), B008 frozen-dataclass defaults, E741 I/J/K grid indices: intentional
+ignore = ["E501", "B905", "B008", "E741"]
