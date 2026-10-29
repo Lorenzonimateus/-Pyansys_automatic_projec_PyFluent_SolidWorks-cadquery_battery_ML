@@ -1,9 +1,9 @@
-"""SpaceClaim stage: .SLDPRT -> .scdocx with the named selections Fluent Meshing needs.
+"""SpaceClaim stage: .SLDPRT or .step -> .scdocx with the named selections Fluent Meshing needs.
 
 SpaceClaim runs in batch (/Headless, /ExitAfterScript) with the IronPython script
-scripts/spaceclaim_prepare.py. The body names come from SolidWorks (cell_1..N,
-volume); the inlet/outlet faces are found by position (ends of the flow axis),
-so they survive any change of dimensions.
+scripts/spaceclaim_prepare.py. The body names come from SolidWorks or from the
+CadQuery STEP (cell_1..N, volume); the inlet/outlet faces are found by position
+(ends of the flow axis), so they survive any change of dimensions.
 """
 
 from __future__ import annotations
@@ -21,7 +21,10 @@ log = logging.getLogger(__name__)
 SCRIPT = Path(__file__).parent / "scripts" / "spaceclaim_prepare.py"
 
 
-def prepare(cfg: Config, sldprt: Path, scdocx: Path, required_bodies: list[str] | None = None) -> Path:
+def prepare(cfg: Config, source: Path, scdocx: Path, required_bodies: list[str] | None = None,
+            body_boxes: dict[str, list[float]] | None = None) -> Path:
+    """body_boxes: {name: [xmin, ymin, zmin, xmax, ymax, zmax] in mm} to name the bodies
+    of a STEP by position (SpaceClaim's STEP reader calls every body "Solid")."""
     sc = cfg.spaceclaim
     exe = Path(sc.exe)
     if not exe.exists():
@@ -30,7 +33,7 @@ def prepare(cfg: Config, sldprt: Path, scdocx: Path, required_bodies: list[str] 
     args_file = work / "spaceclaim_args.json"
     report_file = work / "spaceclaim_report.json"
     args_file.write_text(json.dumps({
-        "source": str(sldprt.resolve()),
+        "source": str(source.resolve()),
         "target": str(scdocx.resolve()),
         "report": str(report_file.resolve()),
         "fluid_body": sc.fluid_body,
@@ -38,6 +41,7 @@ def prepare(cfg: Config, sldprt: Path, scdocx: Path, required_bodies: list[str] 
         "inlet_name": sc.inlet_name,
         "outlet_name": sc.outlet_name,
         "required_bodies": required_bodies or [sc.fluid_body],
+        "body_boxes": {n: [v / 1000.0 for v in box] for n, box in (body_boxes or {}).items()},
     }, indent=2))
 
     cmd = [str(exe), f"/RunScript={SCRIPT.resolve()}", "/ScriptAPI=252", "/Headless=True",
@@ -45,7 +49,7 @@ def prepare(cfg: Config, sldprt: Path, scdocx: Path, required_bodies: list[str] 
     env = {**os.environ, "AUTOCFD_SC_ARGS": str(args_file.resolve())}
     # One retry: the first headless start after a while sometimes opens the part empty.
     for attempt in (1, 2):
-        log.info("SpaceClaim: %s -> %s (attempt %d)", sldprt.name, scdocx.name, attempt)
+        log.info("SpaceClaim: %s -> %s (attempt %d)", source.name, scdocx.name, attempt)
         report_file.unlink(missing_ok=True)
         try:
             subprocess.run(cmd, env=env, timeout=sc.timeout_s, check=False, cwd=work)

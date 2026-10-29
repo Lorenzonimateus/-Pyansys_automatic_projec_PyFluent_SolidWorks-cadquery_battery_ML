@@ -30,6 +30,20 @@ class Paths:
 
 
 @dataclass(frozen=True)
+class Geometry:
+    """Which program builds the parametric geometry, and the fixed dimensions of the
+    CadQuery replica of the SolidWorks part (cadquery_geometry.py)."""
+    engine: str = "solidworks"         # "solidworks" (COM) or "cadquery"
+    diameter: str = "D"                # [cad] variables: cell diameter,
+    row_gap: str = "L1"                # gap between rows (z),
+    column_gap: str = "P1"             # gap between columns (x, flow direction)
+    cell_height_mm: float = 70.15
+    first_cell_x_mm: float = 100.0     # inlet to the axis of the first column
+    first_cell_depth_mm: float = 15.775  # top wall to the axis of the first row
+    duct_length_mm: float = 309.0967
+
+
+@dataclass(frozen=True)
 class SpaceClaim:
     exe: str = "C:/Program Files/ANSYS Inc/v252/scdm/SpaceClaim.exe"
     timeout_s: int = 900
@@ -171,6 +185,7 @@ class Optimize:
 class Config:
     paths: Paths = field(default_factory=Paths)
     cad: dict[str, float] = field(default_factory=dict)
+    geometry: Geometry = field(default_factory=Geometry)
     spaceclaim: SpaceClaim = field(default_factory=SpaceClaim)
     mesh: Mesh = field(default_factory=Mesh)
     fluent: dict[str, float] = field(default_factory=dict)
@@ -194,7 +209,10 @@ class Config:
         mesh = dataclasses.asdict(self.mesh)
         for run_setting in ("processors", "attempts", "retry_wait_s"):  # do not change the mesh
             mesh.pop(run_setting)
-        return {"cad": dict(sorted(self.cad.items())), "mesh": mesh}
+        params = {"cad": dict(sorted(self.cad.items())), "mesh": mesh}
+        if self.geometry.engine != "solidworks":  # SolidWorks keys stay as they were
+            params["geometry"] = dataclasses.asdict(self.geometry)
+        return params
 
     def geometry_key(self) -> str:
         """Short hash of everything that defines geometry + mesh.
@@ -305,6 +323,7 @@ def load_config(path: str | Path) -> Config:
     cfg = Config(
         paths=_build(Paths, raw.get("paths", {})),
         cad={k: float(v) for k, v in raw.get("cad", {}).items()},
+        geometry=_build(Geometry, raw.get("geometry", {})),
         spaceclaim=_build(SpaceClaim, raw.get("spaceclaim", {})),
         mesh=_build(Mesh, raw.get("mesh", {})),
         fluent={k: float(v) for k, v in raw.get("fluent", {}).items()},
@@ -368,6 +387,8 @@ def validate(cfg: Config) -> None:
             raise ValueError(f"[ml_fields] {name}: [{lo}, {hi}] is empty")
     if cfg.geometry_report.indifferent_choice not in ("min", "max", "reference"):
         raise ValueError("[geometry_report] indifferent_choice must be min, max or reference")
+    if cfg.geometry.engine not in ("solidworks", "cadquery"):
+        raise ValueError("geometry.engine must be 'solidworks' or 'cadquery'")
     if cfg.spaceclaim.flow_axis not in ("x", "y", "z"):
         raise ValueError("spaceclaim.flow_axis must be 'x', 'y' or 'z'")
     if cfg.optimize.sense not in ("min", "max"):

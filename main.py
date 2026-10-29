@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 
 # Steps, in order:
 #   "inspect"   list SolidWorks global variables and the base case's parameters
-#   "geometry"  SolidWorks + SpaceClaim           "mesh"   Fluent Meshing (.wft replay)
+#   "geometry"  SolidWorks or CadQuery + SpaceClaim  "mesh"   Fluent Meshing (.wft replay)
 #   "solve"     one point with the config values  "study"  DOE (resumable)
 #   "analyze"   sensitivity (no Ansys)            "train"  ML model (no Ansys)
 #   "optimize"  Bayesian optimization with CFD    "best"   best CFD points (no Ansys)
@@ -29,6 +29,7 @@ STEPS = ["study", "analyze", "train"]
 CONFIG = "configs/default.toml"
 
 # Values that override the config, e.g. {"cad.D": 20.0, "fluent.parameter_velocity_inlet": 5}
+# Geometry in CadQuery instead of SolidWorks: {"geometry.engine": "cadquery"}
 OVERRIDES = {}
 
 

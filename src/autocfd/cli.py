@@ -1,8 +1,8 @@
 """Command line: python -m autocfd <command> [options]
 
-  inspect    list the SolidWorks global variables and the base case's named
-             expressions / report definitions (to fill [cad], [fluent], [solver])
-  geometry   SolidWorks (global variables) + SpaceClaim (named selections) -> .scdocx
+  inspect    list the SolidWorks global variables (or the CadQuery dimensions) and the base
+             case's named expressions / report definitions (to fill [cad], [fluent], [solver])
+  geometry   SolidWorks or CadQuery ([geometry] engine) + SpaceClaim (named selections) -> .scdocx
   mesh       replay the Fluent Meshing workflow (.wft) on that geometry (cached)
   solve      one point with the values in the config (--base: base case as it is)
   study      run the DOE defined in [study] (resumable)
@@ -78,11 +78,22 @@ def main(argv: list[str] | None = None) -> None:
     cfg = load_config(args.config).with_overrides(_parse_set(args.set))
 
     if args.command == "inspect":
-        from .cad import list_parameters
         from .inspect_case import print_case_info
-        print(f"\nSolidWorks global variables of {cfg.paths.sldprt} ([cad] section):")
-        for name, value in list_parameters(Path(cfg.paths.sldprt)).items():
-            print(f"      {name:<36} = {value:g}")
+        if cfg.geometry.engine == "cadquery":
+            from .cadquery_geometry import cell_centres, duct_height
+            g = cfg.geometry
+            print("\nCadQuery geometry ([cad] section and [geometry] fixed dimensions):")
+            for name, value in cfg.cad.items():
+                print(f"      {name:<36} = {value:g}")
+            print(f"      {'duct x, y, z [mm]':<36} = {g.duct_length_mm:g}, {g.cell_height_mm:g}, "
+                  f"{duct_height(cfg):g}")
+            for name, (x, z) in cell_centres(cfg).items():
+                print(f"      {name + ' axis x, z [mm]':<36} = {x:g}, {z:g}")
+        else:
+            from .cad import list_parameters
+            print(f"\nSolidWorks global variables of {cfg.paths.sldprt} ([cad] section):")
+            for name, value in list_parameters(Path(cfg.paths.sldprt)).items():
+                print(f"      {name:<36} = {value:g}")
         print_case_info(cfg.paths.base_case)
     elif args.command == "geometry":
         from .pipeline import ensure_geometry

@@ -44,6 +44,7 @@ números em `reports/figures/numbers.json` (gerados por `python reports/make_rep
 | etapa | ferramenta | o que faz |
 |---|---|---|
 | geometria | SolidWorks (COM) | cópia da peça, variáveis globais (D, L1, P1), rebuild; falha se a combinação for inválida |
+| ou geometria | CadQuery | réplica da mesma peça em Python, STEP com os mesmos corpos; dispensa o SolidWorks (seção 9) |
 | preparação | SpaceClaim (batch) | named selections inlet/output pela posição das faces |
 | malha | Fluent Meshing | repete o workflow `.wft` salvo; até 3 tentativas (falhas de importação CAD transitórias) |
 | solver | Fluent | lê o caso base, troca a malha, aplica as named expressions; convergência por médias de bloco |
@@ -53,7 +54,7 @@ números em `reports/figures/numbers.json` (gerados por `python reports/make_rep
 | geometria | `geometry-report` | comparação justa das folgas, recomendação, `report.md` |
 | transiente | `pinn` | PINN da célula (uma taxa ou paramétrico em C), validado por volumes finitos |
 
-Testes: 58 (sem Ansys), lint ruff limpo.
+Testes: 68 (sem Ansys), lint ruff limpo.
 
 ## 2. Correções e o que elas mudaram
 
@@ -225,7 +226,33 @@ use-o para testar a arquitetura ou aumente o DOE.
 - 1 ponto de 40 (id 14) não convergiu em 1000 iterações (oscilação na esteira); a restrição de
   otimização `dP_Pa <= 25` no config não corresponde à faixa do estudo (ΔP de 10 a 1480 Pa).
 
-## 9. Como reproduzir
+## 9. Motor de geometria: SolidWorks ou CadQuery
+
+`[geometry] engine = "cadquery"` troca o SolidWorks por uma réplica da peça em CadQuery
+(`cadquery_geometry.py`), com as mesmas variáveis D, L1, P1, os mesmos nomes de corpos e a
+mesma numeração das células. As cotas foram lidas da própria peça pela API COM (13
+combinações de D, L1, P1). O STEP passa pelo mesmo SpaceClaim, pelo mesmo `.wft` e pelo
+mesmo caso base. A ideia vem do projeto anterior
+[Pyfluent_Cadquery_battery](https://github.com/Lorenzonimateus/Pyfluent_Cadquery_battery).
+
+Verificação no ponto nominal (D = 21,55, L1 = P1 = 10 mm; 3 m/s; 5C), em que os sólidos dos
+dois motores são idênticos (volumes iguais a 0,1 mm³):
+
+| motor | T máx [°C] | T média [°C] | ΔT células [K] | ΔP [Pa] | T saída [°C] |
+|---|---|---|---|---|---|
+| SolidWorks | 58,18 | 49,60 | 19,97 | 39,59 | 22,87 |
+| CadQuery | 58,09 | 49,66 | 19,38 | 39,50 | 22,89 |
+
+A subida de temperatura máxima (38,2 K) e a perda de carga diferem 0,2 %, e ΔT entre células
+3 %, o que é da ordem do ruído de malha (as duas importações CAD facetam as superfícies de
+formas diferentes). Fora do ponto nominal há uma diferença real: no sketch do SolidWorks o
+comprimento da conduta não é fixado por nenhuma cota e varia entre 304,5 e 311,1 mm com D e L1.
+O CadQuery mantém 309,0967 mm. A diferença fica na saída, ~140 mm depois da última célula.
+Para os dois motores coincidirem em todo o espaço, basta cotar esse comprimento no SolidWorks.
+As pastas de casos do CadQuery têm chave própria, por isso os resultados de um motor nunca
+reutilizam a malha do outro.
+
+## 10. Como reproduzir
 
 ```powershell
 python -m autocfd study                         # 40 pontos (retomável; --retry-failed)

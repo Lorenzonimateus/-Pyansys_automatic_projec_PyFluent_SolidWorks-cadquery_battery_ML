@@ -1,7 +1,7 @@
-"""Chains SolidWorks -> SpaceClaim -> Fluent Meshing -> Fluent, caching per geometry.
+"""Chains SolidWorks or CadQuery -> SpaceClaim -> Fluent Meshing -> Fluent, caching per geometry.
 
-output/cases/<key>/  geom_<key>.SLDPRT, geometry.scdocx, mesh.msh.h5, params.json
-The <key> is a hash of [cad] + [mesh] (Config.geometry_key): the geometry and
+output/cases/<key>/  geom_<key>.SLDPRT or geometry.step, geometry.scdocx, mesh.msh.h5, params.json
+The <key> is a hash of [cad] + [mesh] (+ [geometry] for CadQuery; Config.geometry_key): the geometry and
 mesh are only rebuilt when something that affects them changes; changing only
 [fluent] values reuses them.
 """
@@ -21,21 +21,30 @@ log = logging.getLogger(__name__)
 
 
 def ensure_geometry(cfg: Config) -> Path:
-    """SolidWorks + SpaceClaim: return the prepared .scdocx for this geometry."""
-    from . import cad, spaceclaim
+    """SolidWorks or CadQuery ([geometry] engine) + SpaceClaim: return the prepared
+    .scdocx for this geometry."""
+    from . import spaceclaim
 
     case_dir = cfg.case_dir()
     scdocx = case_dir / "geometry.scdocx"
     if scdocx.exists():
         return scdocx
-    sldprt = cad.build(cfg, case_dir)
-    spaceclaim.prepare(cfg, sldprt, scdocx)
+    if cfg.geometry.engine == "solidworks":
+        from . import cad
+        spaceclaim.prepare(cfg, cad.build(cfg, case_dir), scdocx)
+    elif cfg.geometry.engine == "cadquery":
+        from . import cadquery_geometry
+        step = cadquery_geometry.build(cfg, case_dir)
+        spaceclaim.prepare(cfg, step, scdocx, required_bodies=list(cadquery_geometry.body_boxes(cfg)),
+                           body_boxes=cadquery_geometry.body_boxes(cfg))
+    else:
+        raise ValueError(f"Unknown geometry.engine {cfg.geometry.engine!r}: use solidworks or cadquery")
     (case_dir / "params.json").write_text(json.dumps(cfg.geometry_params(), indent=2))
     return scdocx
 
 
 class GeometryError(RuntimeError):
-    """SolidWorks or SpaceClaim could not produce the geometry (usually an invalid
+    """SolidWorks, CadQuery or SpaceClaim could not produce the geometry (usually an invalid
     parameter combination: retrying the same values gives the same result)."""
 
 

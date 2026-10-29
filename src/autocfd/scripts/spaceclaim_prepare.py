@@ -4,8 +4,10 @@
 # AUTOCFD_SC_ARGS; the result (bodies, named selections, errors) is written to
 # args["report"] as JSON.
 #
-# Steps: open the rebuilt .SLDPRT -> check the body names -> recreate the named
-# selections of the fluid body's faces at the ends of the flow axis -> save .scdocx.
+# Steps: open the rebuilt .SLDPRT (or the CadQuery .step) -> name the bodies of a STEP
+# (its reader drops the names: each body is matched to args["body_boxes"]) -> check the
+# body names -> recreate the named selections of the fluid body's faces at the ends of
+# the flow axis -> save .scdocx.
 
 import json
 import os
@@ -27,6 +29,24 @@ def face_extent(face, axis):
     return lo, hi
 
 
+def body_box(body):
+    box = body.Shape.GetBoundingBox(Matrix.Identity)
+    lo, hi = box.MinCorner, box.MaxCorner
+    return [lo.X, lo.Y, lo.Z, hi.X, hi.Y, hi.Z]
+
+
+def name_bodies(bodies, boxes):
+    """Give each body the name whose bounding box [m] it matches."""
+    if len(bodies) != len(boxes):
+        raise Exception("%d bodies in the file, %d expected" % (len(bodies), len(boxes)))
+    for body in bodies:
+        got = body_box(body)
+        match = [n for n, want in boxes.items() if max(abs(a - b) for a, b in zip(got, want)) < 1e-5]
+        if len(match) != 1:
+            raise Exception("Body with box %s matches %s" % (got, match))
+        body.SetName(match[0])
+
+
 def name_face(face, name):
     result = NamedSelection.Create(FaceSelection.Create(face), Selection.Empty())
     NamedSelection.Rename(result.CreatedNamedSelection.GetName(), name)
@@ -35,6 +55,8 @@ def name_face(face, name):
 try:
     DocumentOpen.Execute(args["source"])
     bodies = list(GetRootPart().GetAllBodies())
+    if args.get("body_boxes"):
+        name_bodies(bodies, args["body_boxes"])
     names = [b.GetName() for b in bodies]
     report["bodies"] = names
     for required in args["required_bodies"]:

@@ -1,4 +1,4 @@
-# Parametric CFD pipeline: SolidWorks -> SpaceClaim -> Fluent Meshing -> Fluent -> ML.
+# Parametric CFD pipeline: SolidWorks or CadQuery -> SpaceClaim -> Fluent Meshing -> Fluent -> ML.
 # Relative paths are resolved from the folder the command is run in.
 # Every value can be overridden with --set section.name=value (or OVERRIDES in main.py).
 
@@ -17,7 +17,25 @@ D = 21.55      # cell diameter           -> D7@Sketch6
 L1 = 10.0      #                          -> D3@Sketch6
 P1 = 10.0      #                          -> D9@Sketch6
 
-# SpaceClaim (batch, no GUI): opens the rebuilt .SLDPRT and recreates the named
+# Which program builds the geometry from [cad]:
+#   "solidworks"  a copy of paths.sldprt with new global variables (COM API)
+#   "cadquery"    a Python replica of the same part (cadquery_geometry.py), saved as STEP;
+#                 no SolidWorks needed. Same body names, so SpaceClaim, the .wft and the
+#                 base case are the same. Its cases get their own folders (other key).
+# The fixed dimensions below are those of the SolidWorks part and are only used by
+# CadQuery. duct_length_mm is not driven by any dimension in the SolidWorks sketch
+# (it moves 304.5 to 311.1 mm with D and L1); CadQuery keeps the nominal value.
+[geometry]
+engine = "solidworks"
+diameter = "D"             # [cad] names of: cell diameter,
+row_gap = "L1"             #   gap between rows (z),
+column_gap = "P1"          #   gap between columns (x, flow)
+cell_height_mm = 70.15
+first_cell_x_mm = 100.0
+first_cell_depth_mm = 15.775
+duct_length_mm = 309.0967
+
+# SpaceClaim (batch, no GUI): opens the rebuilt .SLDPRT (or the CadQuery .step) and recreates the named
 # selections of the fluid body's faces at the ends of the flow axis.
 [spaceclaim]
 exe = "C:/Program Files/ANSYS Inc/v252/scdm/SpaceClaim.exe"

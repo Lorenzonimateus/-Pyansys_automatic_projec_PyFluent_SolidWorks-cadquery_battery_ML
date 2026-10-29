@@ -5,11 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autocfd"
 version = "0.1.0"
-description = "Parametric CFD pipeline: SolidWorks -> SpaceClaim -> Fluent Meshing -> Fluent -> ML/optimization"
+description = "Parametric CFD pipeline: SolidWorks or CadQuery -> SpaceClaim -> Fluent Meshing -> Fluent -> ML/optimization"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "ansys-fluent-core>=0.35",
+    "cadquery>=2.4",
     "h5py>=3.10",
     "joblib>=1.3",
     "matplotlib>=3.7",

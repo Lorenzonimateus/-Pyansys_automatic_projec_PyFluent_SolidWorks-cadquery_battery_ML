@@ -3,7 +3,7 @@
 > **Projeto de aprendizado / learning project.**
 >
 > **PT:** Este é um projeto educacional, feito para aprender a integrar ferramentas: PyCharm +
-> Python + PyAnsys (PyFluent) + SolidWorks (API COM) + SpaceClaim (script) + Fluent Meshing +
+> Python + PyAnsys (PyFluent) + SolidWorks (API COM) ou CadQuery + SpaceClaim (script) + Fluent Meshing +
 > Fluent, e depois usar os resultados com scikit-learn (processos gaussianos, Sobol) e PyTorch
 > (PINN). O caso físico (refrigeração a ar de 9 células 21700) é **simples e não é uma análise
 > crítica de engenharia**: CFD em regime permanente, sem estudo de independência de malha, sem
@@ -11,7 +11,7 @@
 > Use como exemplo de automação e de método, **não** para decisões de projeto ou de segurança.
 >
 > **EN:** An educational project to learn how to tie together PyCharm + Python + PyAnsys
-> (PyFluent) + SolidWorks (COM API) + SpaceClaim (scripting) + Fluent Meshing + Fluent, and then
+> (PyFluent) + SolidWorks (COM API) or CadQuery + SpaceClaim (scripting) + Fluent Meshing + Fluent, and then
 > feed the results to scikit-learn (Gaussian processes, Sobol indices) and PyTorch (PINN). The
 > physical case (air cooling of 9 cells 21700) is **simple and not a critical engineering
 > analysis**: steady-state CFD, no mesh-independence study, no experimental validation,
@@ -23,7 +23,7 @@
 | what | tool |
 |---|---|
 | IDE / runner | PyCharm (`main.py`), Python 3.12, venv |
-| CAD (parametric geometry) | SolidWorks 2025, driven through its COM API (`pywin32`) |
+| CAD (parametric geometry) | SolidWorks 2025, driven through its COM API (`pywin32`), **or** CadQuery 2.8 (a Python replica of the same part, no SolidWorks needed) |
 | geometry preparation | Ansys SpaceClaim 2025 R2, IronPython batch script |
 | mesh | Ansys Fluent Meshing 2025 R2, saved watertight workflow (`.wft`) replayed by PyFluent |
 | CFD | Ansys Fluent 2025 R2 through PyAnsys (`ansys-fluent-core`) |
@@ -33,8 +33,8 @@
 | figures | Matplotlib |
 | tests / lint | pytest, ruff |
 
-Parametric CFD pipeline for studies that are too complex to script the geometry
-in Python: the geometry lives in **SolidWorks**, it is prepared in **SpaceClaim**,
+Parametric CFD pipeline: the geometry is built by **SolidWorks** or by **CadQuery**
+(`[geometry] engine`, see [Geometry engine](#geometry-engine-solidworks-or-cadquery)), it is prepared in **SpaceClaim**,
 meshed with a **Fluent Meshing** workflow and solved with a **Fluent** base case,
 all set up and tuned by hand once. Python (PyAnsys + COM) then drives the whole
 chain for every design point and feeds the results to sensitivity analysis,
@@ -46,6 +46,7 @@ Machine Learning, optimization and a transient model of the battery cells (PINN)
             set up ONCE by hand (GUI)                      driven by Python for each point
  ┌───────────────────────────────────────────┐   ┌─────────────────────────────────────────────┐
  SolidWorks  global variables (D, L1, P1, ...)  ──► copy of the part, new values, rebuild   (COM)
+   or CadQuery  same part, same D, L1, P1        ──► solids built in Python, saved as STEP  (OCP)
  SpaceClaim  body names + named selections       ──► batch script: inlet/outlet by position  (IronPython)
  Fluent Meshing  watertight workflow  (.wft)     ──► replay the .wft on the new .scdocx      (PyFluent)
  Fluent      base case: physics, named           ──► replace mesh, set named expressions,    (PyFluent)
@@ -71,6 +72,7 @@ Or from the terminal (`python -m autocfd ...` is equivalent to `autocfd ...`):
 ```powershell
 autocfd inspect                        # what can be parametrized (SolidWorks + base case)
 autocfd geometry --set cad.D=20        # SolidWorks + SpaceClaim -> .scdocx
+autocfd geometry --set geometry.engine=cadquery --set cad.D=20   # the same with CadQuery
 autocfd mesh --set cad.D=20            # Fluent Meshing (cached per geometry)
 autocfd solve --set cad.D=20 --set fluent.parameter_velocity_inlet=5
 autocfd solve --base                   # base case as it is (checks the solver settings)
@@ -94,7 +96,8 @@ autocfd best                           # best CFD points so far
 ## Requirements
 
 - Windows, Python ≥ 3.11
-- SolidWorks (tested with 2025, API rev 33) — only for `geometry`
+- SolidWorks (tested with 2025, API rev 33): only for `geometry` with `engine = "solidworks"`;
+  with `engine = "cadquery"` it is not needed (CadQuery is installed with the package)
 - Ansys 2025 R2 (v252): SpaceClaim + Fluent licenses — for `geometry`, `mesh`, `solve`,
   `study`, `optimize`, `postprocess`. `analyze`, `train`, `best`, `pinn` and `inspect` of
   the case run without Ansys.
@@ -108,9 +111,47 @@ pip install -e ".[dev]"
 pip install torch --index-url https://download.pytorch.org/whl/cu126   # for `pinn`
 ```
 
+## Geometry engine: SolidWorks or CadQuery
+
+`[geometry] engine` chooses who builds the geometry from `[cad]` (D, L1, P1):
+
+| engine | what it does | needs |
+|---|---|---|
+| `"solidworks"` (default) | copy of `paths.sldprt`, new global variables, rebuild (`cad.py`) | SolidWorks |
+| `"cadquery"` | the same part written in Python (`cadquery_geometry.py`), saved as `geometry.step` | nothing extra |
+
+Either way SpaceClaim makes the `.scdocx`, and from there the chain is the same (same
+`.wft`, same base case). Switch with `--set geometry.engine=cadquery`, or
+`OVERRIDES = {"geometry.engine": "cadquery"}` in `main.py`.
+
+The CadQuery stage is a replica of `geometria_parametrizada.SLDPRT`, read from the part
+itself through the COM API: 3 x 3 cells along +Y, at x = 100 + i (D + P1) and
+z = −(15.775 + j (D + L1)), duct height 15.775 + 2 (D + L1) + D/2 + L1, the same body
+names and the same numbering of `cell_1..9`. The fixed dimensions are in `[geometry]`.
+At the nominal point (D = 21.55, L1 = P1 = 10) both engines give the same solids
+(volumes equal to 0.1 mm³). Two details:
+
+- **Duct length.** In the SolidWorks sketch the outlet edge is not fixed by any dimension,
+  so SolidWorks moves it between 304.5 and 311.1 mm when D or L1 change. CadQuery keeps
+  309.0967 mm (`[geometry] duct_length_mm`). Away from the nominal point the two engines
+  differ only in the length of the outlet duct, ~140 mm behind the last cell.
+- **Body names.** SpaceClaim's STEP reader calls every body "Solid" (even in a STEP
+  written by SolidWorks), so the SpaceClaim script names them again by their bounding
+  boxes, which the CadQuery stage knows exactly.
+
+CadQuery cases have their own key (the `[geometry]` section is part of it), so they never
+reuse a SolidWorks mesh, and the SolidWorks keys are the same as before.
+
+The idea of building the cell array in CadQuery comes from an earlier project of mine,
+[Pyfluent_Cadquery_battery](https://github.com/Lorenzonimateus/Pyfluent_Cadquery_battery)
+(geometry, mesh and solver all scripted in Python). Here only the geometry stage is
+taken, so the CadQuery geometry goes through the same SpaceClaim, Fluent Meshing
+workflow and base case as the SolidWorks one.
+
 ## Input files (not in the repository)
 
 The pipeline starts from four files made by hand, which are **not published** here
+(with `engine = "cadquery"` the `.SLDPRT` is not needed)
 (`inputs/` is in `.gitignore`): the SolidWorks part with the global variables, the
 SpaceClaim document with the named selections, the Fluent Meshing workflow and the
 Fluent base case. `configs/default.toml` (`[paths]`) expects them in `inputs/`:
@@ -150,11 +191,12 @@ then check them with `autocfd inspect`.
 | Stage | What it does | Cache / output |
 |---|---|---|
 | SolidWorks | copies the part to `geom_<key>.SLDPRT` (the original is never touched), sets the global variables, rebuilds, and **fails if the rebuild has errors** (invalid combination) | `output/cases/<key>/` |
-| SpaceClaim | `SpaceClaim.exe /Headless /RunScript`: opens the part, checks the bodies, creates the named selections, saves `geometry.scdocx` | `spaceclaim_report.json` |
+| or CadQuery | checks the clearances (cells touching each other or a wall), builds the fluid and the 9 cells, writes one STEP part with named solids and checks it (number of solids, fluid volume) | `geometry.step` |
+| SpaceClaim | `SpaceClaim.exe /Headless /RunScript`: opens the part (or the STEP, naming its bodies by position), checks the bodies, creates the named selections, saves `geometry.scdocx` | `spaceclaim_report.json` |
 | Fluent Meshing | loads the `.wft`, replaces the geometry file, sizes and prism layers, runs every task up to the volume mesh and checks that all tasks are up to date | `mesh.msh.h5` |
 | Fluent | reads the base case, **replaces the mesh** (zones matched by name, so all the setup is kept), sets the named expressions, iterates | `studies/<name>/points/dpNNN.cas.h5` |
 
-The `<key>` is a hash of `[cad]` + `[mesh]`: changing only `[fluent]` values reuses
+The `<key>` is a hash of `[cad]` + `[mesh]` (+ `[geometry]` for CadQuery): changing only `[fluent]` values reuses
 the geometry and the mesh; within a study all points that share a geometry run in
 one Fluent session, each starting from the previous solution.
 
@@ -223,7 +265,7 @@ ds["targets"]   # (N, 1, 128, 256): T_norm        -> CNN output (U-Net)
 
 **Transient cell temperature (PINN).** See the section below.
 
-**Failures.** Statuses in `results.csv`: `geometry_failed` (SolidWorks or SpaceClaim:
+**Failures.** Statuses in `results.csv`: `geometry_failed` (SolidWorks, CadQuery or SpaceClaim:
 usually an invalid parameter combination), `mesh_failed` (Fluent Meshing, after
 `[mesh] attempts` tries: the CAD import of the .scdocx can fail for reasons outside
 the geometry, e.g. "attaching to assembly failed"), `solve_failed` (Fluent; the session
@@ -312,10 +354,11 @@ Tables: `steady_vs_cfd.csv`, `*_pinn_vs_fv.csv`, `*_metrics.csv`,
 ```
 output/
   cases/<key>/              one folder per distinct geometry + mesh
-    geom_<key>.SLDPRT         rebuilt part
+    geom_<key>.SLDPRT         rebuilt part (SolidWorks)
+    geometry.step             or the CadQuery geometry
     geometry.scdocx           prepared geometry
     mesh.msh.h5
-    params.json               [cad] + [mesh] that produced it
+    params.json               [cad] + [mesh] (+ [geometry]) that produced it
   single_runs.csv           results of `solve`
   single/images/<case>/     images of each `solve`
   studies/<name>/
@@ -406,7 +449,8 @@ against 425 cm³ at L1 = P1 = 6), provided the fan delivers ~150 Pa at 13 g/s.
 pytest
 ```
 
-They cover the configuration, the convergence logic, the workflow/case parsing, the
+They cover the configuration, the CadQuery geometry (layout against the SolidWorks part,
+clearances, named solids in the STEP), the convergence logic, the workflow/case parsing, the
 retries, the ML fields, the ML model and the optimizer, the cell model (analytical
 solutions, energy conservation, lumped limit) and the PINNs (small networks on the
 CPU), without needing Ansys or SolidWorks.
